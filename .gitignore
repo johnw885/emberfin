@@ -1,0 +1,22 @@
+# Gradle / Android Studio
+.gradle/
+.kotlin/
+build/
+.idea/
+*.iml
+captures/
+
+# Holds sdk.dir and DEV_SERVER_URL: never commit
+local.properties
+
+# Signing material
+*.jks
+*.keystore
+
+# Claude Code local settings
+.claude/
+
+# OS / editor
+Thumbs.db
+desktop.ini
+.DS_Store
