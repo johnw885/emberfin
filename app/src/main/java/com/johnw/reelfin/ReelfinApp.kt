@@ -6,7 +6,6 @@ import com.johnw.reelfin.data.JellyfinClientFactory
 import com.johnw.reelfin.data.LibraryRepository
 import com.johnw.reelfin.data.ServerRepository
 import com.johnw.reelfin.data.SessionStore
-import com.johnw.reelfin.playback.PlaybackNegotiator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 
@@ -20,5 +19,4 @@ class ReelfinApp : Application() {
     val servers by lazy { ServerRepository(clients) }
     val auth by lazy { AuthRepository(clients, store) }
     val library by lazy { LibraryRepository() }
-    val negotiator by lazy { PlaybackNegotiator() }
 }

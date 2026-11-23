@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.johnw.reelfin.data.HomeRow
 import com.johnw.reelfin.data.QuickConnectState
 import com.johnw.reelfin.data.StoredSession
-import com.johnw.reelfin.player.PlayerSession
+import com.johnw.reelfin.player.PlayerArgs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,7 +21,7 @@ sealed interface Screen {
     data class Server(val url: String, val busy: Boolean = false, val error: String? = null) : Screen
     data class QuickConnect(val serverUrl: String, val serverName: String, val code: String? = null, val error: String? = null) : Screen
     data class Home(val row: HomeRow? = null, val error: String? = null) : Screen
-    data class Player(val session: PlayerSession) : Screen
+    data class Player(val args: PlayerArgs) : Screen
 }
 
 /** Drives the spike flow: server -> Quick Connect -> one row -> player. */
@@ -123,49 +123,22 @@ class SpikeViewModel(application: Application) : AndroidViewModel(application) {
     fun imageUrl(item: BaseItemDto, width: Int): String? =
         api?.let { com.johnw.reelfin.data.ImageUrls.landscape(it, item, width) }
 
-    fun play(item: BaseItemDto) =
-        start(item.id, displayTitle(item), (item.userData?.playbackPositionTicks ?: 0L) / 10_000)
+    /** Play/Resume: the player continues from the server's resume point. */
+    fun play(item: BaseItemDto) {
+        if (session == null) return
+        _screen.value = Screen.Player(PlayerArgs(item.id.toString(), PlayerArgs.RESUME))
+    }
 
-    /** Debug hook (see MainActivity.handleDebugIntent). */
+    /** Debug hook (see MainActivity.handleDebugIntent). A negative start means "resume". */
     fun playById(itemId: String, startMs: Long) {
         if (session == null) return
-        (_screen.value as? Screen.Player)?.session?.release()
-        start(itemId.toUUID(), "Item $itemId", startMs)
+        _screen.value = Screen.Player(PlayerArgs(itemId, if (startMs < 0) PlayerArgs.RESUME else startMs))
     }
 
-    private fun start(itemId: UUID, title: String, startMs: Long) {
-        val api = api ?: return
-        val s = session ?: return
-        val row = (_screen.value as? Screen.Home)?.row
-        viewModelScope.launch {
-            try {
-                val plan = app.negotiator.plan(api, s.userId, itemId)
-                val player = PlayerSession(
-                    context = app,
-                    appScope = app.appScope,
-                    api = api,
-                    authorizationHeader = app.clients.authorizationHeader(s.accessToken),
-                    plan = plan,
-                    title = title,
-                    startPositionMs = startMs,
-                )
-                _screen.value = Screen.Player(player)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _screen.value = Screen.Home(row = row, error = "Can't play: ${e.message}")
-            }
-        }
-    }
-
+    /** The player screen releases itself when it leaves composition. */
     fun closePlayer() {
-        (_screen.value as? Screen.Player)?.session?.release()
         _screen.value = Screen.Home()
         viewModelScope.launch { loadHome() }
-    }
-
-    override fun onCleared() {
-        (_screen.value as? Screen.Player)?.session?.release()
     }
 
     companion object {

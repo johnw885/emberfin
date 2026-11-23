@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.johnw.reelfin.player.PlaybackPrefs
 import com.johnw.reelfin.player.PlayerScreen
 import com.johnw.reelfin.spike.HomeScreen
 import com.johnw.reelfin.spike.QuickConnectScreen
@@ -41,18 +42,14 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Debug builds only: `adb shell am start -n com.johnw.reelfin/.MainActivity
-     * --es play_item_id <id> [--el start_ms <ms>]` plays an item directly, for playback testing.
+     * --es play_item_id <id> [--el start_ms <ms>, -1 = resume]` plays an item directly, for playback testing.
      */
     private fun handleDebugIntent(intent: Intent?) {
-        if (!BuildConfig.DEBUG) return
-        val id = intent?.getStringExtra("play_item_id") ?: return
+        if (!BuildConfig.DEBUG || intent == null) return
+        // `--ei max_bitrate <bps>` sets the quality cap (Session 4 adds the settings screen).
+        if (intent.hasExtra("max_bitrate")) PlaybackPrefs(this).maxStreamingBitrate = intent.getIntExtra("max_bitrate", 0)
+        val id = intent.getStringExtra("play_item_id") ?: return
         vm.playById(id, intent.getLongExtra("start_ms", 0L))
-    }
-
-    override fun onStop() {
-        super.onStop()
-        // Leaving the app (Home button, input switch) ends playback and saves the resume point.
-        if (vm.screen.value is Screen.Player) vm.closePlayer()
     }
 }
 
@@ -63,6 +60,6 @@ private fun SpikeApp(vm: SpikeViewModel) {
         is Screen.Server -> ServerScreen(s, onConnect = vm::connect)
         is Screen.QuickConnect -> QuickConnectScreen(s, onBack = vm::backToServer)
         is Screen.Home -> HomeScreen(s, imageUrl = vm::imageUrl, onPlay = vm::play, onSignOut = vm::signOut)
-        is Screen.Player -> PlayerScreen(s.session, onExit = vm::closePlayer)
+        is Screen.Player -> PlayerScreen(s.args, onExit = vm::closePlayer)
     }
 }
