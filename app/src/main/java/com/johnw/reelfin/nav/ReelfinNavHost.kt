@@ -22,7 +22,9 @@ import com.johnw.reelfin.player.PlayerScreen
 import com.johnw.reelfin.profiles.AddProfileScreen
 import com.johnw.reelfin.profiles.ProfilesScreen
 import com.johnw.reelfin.shell.MainScreen
-import com.johnw.reelfin.shell.PlaceholderScreen
+import com.johnw.reelfin.search.SearchScreen
+import com.johnw.reelfin.settings.LicensesScreen
+import com.johnw.reelfin.settings.SettingsScreen
 import com.johnw.reelfin.ui.Reelfin
 import com.johnw.reelfin.ui.Wordmark
 import kotlinx.coroutines.flow.Flow
@@ -36,6 +38,12 @@ class AppNavigator(private val nav: NavHostController) {
     fun play(itemId: String, startMs: Long = PlayerArgs.RESUME) = nav.navigate(PlayerRoute(itemId, startMs))
     fun search() = nav.navigate(SearchRoute) { launchSingleTop = true }
     fun settings() = nav.navigate(SettingsRoute) { launchSingleTop = true }
+    fun licenses() = nav.navigate(LicensesRoute) { launchSingleTop = true }
+    /** After signing a profile out: the picker, with nothing underneath. */
+    fun profilesFresh() = nav.navigate(ProfilesRoute) { popUpTo(0) { inclusive = true } }
+    /** No profiles left (or the last one expired): the sign-in flow as on first run. */
+    fun signInFresh(expiredUser: String? = null) =
+        nav.navigate(AddProfileRoute(firstRun = true, expiredUser = expiredUser)) { popUpTo(0) { inclusive = true } }
     // Main stays underneath, so Back returns to it; picking a profile rebuilds Main from scratch.
     fun profiles() = nav.navigate(ProfilesRoute) { launchSingleTop = true }
     fun addProfile() = nav.navigate(AddProfileRoute())
@@ -50,6 +58,15 @@ class AppNavigator(private val nav: NavHostController) {
 fun ReelfinNavHost(nav: NavHostController, debugPlay: Flow<PlayerRoute>) {
     val sessions: SessionManager = koinInject()
     val app = androidx.compose.runtime.remember(nav) { AppNavigator(nav) }
+
+    // The server stopped accepting this profile's sign-in (token revoked or expired): sign in again.
+    LaunchedEffect(Unit) {
+        sessions.expired.collect { account ->
+            sessions.clearExpired()
+            val others = sessions.accounts.first().isNotEmpty()
+            if (others) app.profilesFresh() else app.signInFresh(account.userName)
+        }
+    }
 
     // Debug builds: `am start --es play_item_id …` plays an item once a profile is active.
     LaunchedEffect(Unit) {
@@ -83,7 +100,7 @@ fun ReelfinNavHost(nav: NavHostController, debugPlay: Flow<PlayerRoute>) {
         composable<ProfilesRoute> { ProfilesScreen(onOpen = app::main, onAdd = app::addProfile) }
         composable<AddProfileRoute> { entry ->
             val r = entry.toRoute<AddProfileRoute>()
-            AddProfileScreen(firstRun = r.firstRun, onDone = app::main, onBack = { if (!r.firstRun) app.back() })
+            AddProfileScreen(firstRun = r.firstRun, expiredUser = r.expiredUser, onDone = app::main, onBack = { if (!r.firstRun) app.back() })
         }
         composable<MainRoute> { MainScreen(app) }
         composable<DetailsRoute> { entry -> DetailsScreen(entry.toRoute<DetailsRoute>().itemId, app) }
@@ -97,12 +114,9 @@ fun ReelfinNavHost(nav: NavHostController, debugPlay: Flow<PlayerRoute>) {
             // only pop while this entry is still on top, or Main gets popped too.
             PlayerScreen(PlayerArgs(r.itemId, r.startMs), onExit = { if (nav.currentBackStackEntry?.id == entry.id) nav.popBackStack() })
         }
-        composable<SearchRoute> {
-            PlaceholderScreen("Search", "Search with the on-screen keyboard or your remote's mic arrives in the next update.", onBack = { app.back() })
-        }
-        composable<SettingsRoute> {
-            PlaceholderScreen("Settings", "Playback, subtitle and account settings arrive in the next update.", onBack = { app.back() })
-        }
+        composable<SearchRoute> { SearchScreen(app) }
+        composable<SettingsRoute> { SettingsScreen(app) }
+        composable<LicensesRoute> { LicensesScreen(app) }
     }
 }
 

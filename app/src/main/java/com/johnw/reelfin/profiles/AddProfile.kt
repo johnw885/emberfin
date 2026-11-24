@@ -43,7 +43,9 @@ import com.johnw.reelfin.data.AuthRepository
 import com.johnw.reelfin.data.QuickConnectState
 import com.johnw.reelfin.data.ServerInfo
 import com.johnw.reelfin.data.ServerRepository
+import com.johnw.reelfin.data.ServerVersions
 import com.johnw.reelfin.data.SessionManager
+import com.johnw.reelfin.data.UnsupportedServerException
 import com.johnw.reelfin.ui.ActionButton
 import com.johnw.reelfin.ui.Reelfin
 import com.johnw.reelfin.ui.ReelfinType
@@ -95,7 +97,11 @@ class AddProfileViewModel(
                     val users = servers.publicUsers(info.url).mapNotNull { it.name }
                     _state.update { it.copy(step = AddStep.Method(info, users), busy = false) }
                 }
-                .onFailure { e -> _state.update { it.copy(busy = false, error = "Can't reach that server (${e.message}).") } }
+                .onFailure { e ->
+                    val msg = if (e is UnsupportedServerException) "Reelfin needs Jellyfin ${ServerVersions.MINIMUM} or newer; this server runs ${e.version}."
+                    else "Can't reach that server (${e.message})."
+                    _state.update { it.copy(busy = false, error = msg) }
+                }
         }
     }
 
@@ -156,7 +162,7 @@ class AddProfileViewModel(
 }
 
 @Composable
-fun AddProfileScreen(firstRun: Boolean, onDone: () -> Unit, onBack: () -> Unit, vm: AddProfileViewModel = koinViewModel()) {
+fun AddProfileScreen(firstRun: Boolean, onDone: () -> Unit, onBack: () -> Unit, expiredUser: String? = null, vm: AddProfileViewModel = koinViewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     BackHandler { if (!vm.back()) onBack() }
     LaunchedEffect(state.step) { if (state.step == AddStep.Done) onDone() }
@@ -168,6 +174,13 @@ fun AddProfileScreen(firstRun: Boolean, onDone: () -> Unit, onBack: () -> Unit, 
     ) {
         Wordmark(size = 30)
         Spacer(Modifier.height(28.dp))
+        if (expiredUser != null && state.step == AddStep.Server) {
+            Text(
+                "The server signed $expiredUser out (the sign-in was removed or expired). Sign in again to keep watching.",
+                style = ReelfinType.body, color = Reelfin.colors.accent,
+            )
+            Spacer(Modifier.height(16.dp))
+        }
         when (val step = state.step) {
             AddStep.Server -> ServerStep(state, firstRun, vm::connect)
             is AddStep.Method -> MethodStep(step, vm)

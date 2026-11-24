@@ -98,14 +98,14 @@ class LibraryTabViewModel(
         val view = library.views(session).firstOrNull { if (tab == Tab.Shows) LibraryRepository.isShows(it) else LibraryRepository.isMovies(it) }
         val parent = view?.id
         coroutineScope {
-            val featured = async { runCatching { library.featured(session, kinds, parent) }.getOrDefault(emptyList()) }
-            val latest = async { parent?.let { p -> runCatching { library.latest(session, p) }.getOrNull() }.orEmpty() }
-            val genres = runCatching { library.genres(session, kinds, parent) }.getOrDefault(emptyList())
+            val featured = async { optional(emptyList()) { library.featured(session, kinds, parent) } }
+            val latest = async { parent?.let { p -> optional(null) { library.latest(session, p) } }.orEmpty() }
+            val genres = optional(emptyList()) { library.genres(session, kinds, parent) }
             val genreList = genres.mapNotNull { g -> g.name?.let { Genre(g.id, it) } }
             val top = genres.sortedByDescending { (it.movieCount ?: 0) + (it.seriesCount ?: 0) + (it.childCount ?: 0) }.take(6)
             val genreRows = top.map { g ->
                 async {
-                    runCatching { library.byGenre(session, g.id, kinds, parent) }.getOrNull()
+                    optional(null) { library.byGenre(session, g.id, kinds, parent) }
                         ?.takeIf { it.size >= 3 }?.let { RowUi("genre/${g.id}", g.name.orEmpty(), RowStyle.Poster, it) }
                 }
             }
@@ -122,7 +122,7 @@ class LibraryTabViewModel(
     }
 
     override fun onError(e: Exception) {
-        _state.update { it.copy(loading = false, error = if (it.rows.isEmpty()) "Couldn't load ${tab.label}: ${e.message}" else null) }
+        _state.update { it.copy(loading = false, error = if (it.rows.isEmpty()) com.johnw.reelfin.home.loadError(tab.label, e) else null) }
     }
 
     fun setSort(sort: LibrarySort) = updateQuery { it.copy(sort = sort) }

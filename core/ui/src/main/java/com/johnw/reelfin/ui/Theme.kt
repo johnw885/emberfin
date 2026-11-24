@@ -75,7 +75,7 @@ object ReelfinType {
     val nav = TextStyle(fontFamily = f, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, lineHeight = 20.sp)
 }
 
-/** Inter (SIL OFL 1.1, bundled in res/font; see core/ui/fonts/Inter-OFL.txt). */
+/** Inter (SIL OFL 1.1, bundled in res/font; licence text in res/raw/inter_ofl.txt). */
 object ReelfinFonts {
     val Sans: FontFamily = FontFamily(
         Font(R.font.inter_regular, FontWeight.Normal),

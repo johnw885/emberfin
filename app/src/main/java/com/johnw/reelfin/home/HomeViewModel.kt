@@ -9,6 +9,7 @@ import com.johnw.reelfin.data.ActiveSession
 import com.johnw.reelfin.data.CachedRow
 import com.johnw.reelfin.data.LibraryRepository
 import com.johnw.reelfin.data.RowCache
+import com.johnw.reelfin.data.isUnreachable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -65,7 +66,7 @@ class HomeViewModel(
     }
 
     override fun onError(e: Exception) {
-        _state.update { it.copy(loading = false, error = if (it.rows.isEmpty()) "Couldn't load your library: ${e.message}" else null) }
+        _state.update { it.copy(loading = false, error = if (it.rows.isEmpty()) loadError("your library", e) else null) }
     }
 
     override fun onMyListChanged() {
@@ -84,7 +85,7 @@ class HomeViewModel(
     private suspend fun load(): Pair<List<BaseItemDto>, List<RowUi>> = coroutineScope {
         val s = session
         val views = library.views(s)
-        val featured = async { runCatching { library.featured(s, listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES)) }.getOrDefault(emptyList()) }
+        val featured = async { optional(emptyList()) { library.featured(s, listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES)) } }
         val resume = async { row(KEY_RESUME, "Continue Watching", RowStyle.Landscape) { library.resume(s) } }
         val nextUp = async { row(KEY_NEXT_UP, "Next Up", RowStyle.Landscape) { library.nextUp(s) } }
         val myList = async { row(KEY_MY_LIST, "My List", RowStyle.Poster) { library.favorites(s) } }
@@ -97,7 +98,7 @@ class HomeViewModel(
             }
         val genres = async {
             val kinds = listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES)
-            val all = runCatching { library.genres(s, kinds) }.getOrDefault(emptyList())
+            val all = optional(emptyList()) { library.genres(s, kinds) }
             val top = all.sortedByDescending { (it.movieCount ?: 0) + (it.seriesCount ?: 0) + (it.childCount ?: 0) }.take(8)
             // A different trio each day, stable within the day.
             val seed = LocalDate.now().toEpochDay().toInt()
@@ -111,7 +112,7 @@ class HomeViewModel(
     }
 
     private suspend fun row(key: String, title: String, style: RowStyle, fetch: suspend () -> List<BaseItemDto>): RowUi? =
-        runCatching { fetch() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { RowUi(key, title, style, it) }
+        optional(null) { fetch() }?.takeIf { it.isNotEmpty() }?.let { RowUi(key, title, style, it) }
 
     companion object {
         const val KEY_RESUME = "resume"
@@ -119,3 +120,8 @@ class HomeViewModel(
         const val KEY_MY_LIST = "mylist"
     }
 }
+
+/** The message a screen shows when its first load fails. */
+fun loadError(what: String, e: Exception): String =
+    if (e.isUnreachable()) "Can't reach the server, so $what can't load right now."
+    else "Couldn't load $what (${e.message ?: e.javaClass.simpleName})."

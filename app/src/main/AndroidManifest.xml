@@ -10,6 +10,13 @@
         android:name="android.hardware.touchscreen"
         android:required="false" />
 
+    <!-- Search's mic button asks the system speech recognizer (no RECORD_AUDIO permission needed). -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+    </queries>
+
     <!-- Backups are allowed, but the rules exclude the auth prefs (token, device id). -->
     <application
         android:name=".ReelfinApp"

@@ -14,6 +14,8 @@ class ServerRepository(private val factory: JellyfinClientFactory) {
         runCatching {
             val url = normalize(input)
             val info = factory.create(url).systemApi.getPublicSystemInfo().content
+            val version = info.version.orEmpty()
+            if (!ServerVersions.isSupported(version)) throw UnsupportedServerException(version)
             ServerInfo(url = url, id = info.id ?: url, name = info.serverName ?: "Jellyfin", version = info.version ?: "?")
         }
     }
@@ -30,5 +32,32 @@ class ServerRepository(private val factory: JellyfinClientFactory) {
             return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) trimmed
             else "http://$trimmed"
         }
+    }
+}
+
+class UnsupportedServerException(val version: String) :
+    Exception("this server runs Jellyfin $version; Reelfin needs ${ServerVersions.MINIMUM} or newer")
+
+/** Reelfin supports Jellyfin 12.0 and newer (jellyfin-sdk-kotlin 1.9's own minimum; decided 2026-11-23). */
+object ServerVersions {
+    const val MINIMUM = "12.0.0"
+
+    /** "12.4.0" → [12, 4, 0]; null for anything that isn't a dotted version. */
+    fun parse(version: String): List<Int>? {
+        val parts = version.trim().substringBefore('-').split('.')
+        if (parts.isEmpty() || parts.any { it.toIntOrNull() == null }) return null
+        return parts.map { it.toInt() }
+    }
+
+    /** Unknown versions are let through: better to try than to lock someone out. */
+    fun isSupported(version: String): Boolean {
+        val v = parse(version) ?: return true
+        val min = parse(MINIMUM)!!
+        for (i in 0 until maxOf(v.size, min.size)) {
+            val a = v.getOrElse(i) { 0 }
+            val b = min.getOrElse(i) { 0 }
+            if (a != b) return a > b
+        }
+        return true
     }
 }

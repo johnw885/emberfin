@@ -10,6 +10,7 @@ import coil3.request.crossfade
 import com.johnw.reelfin.data.JellyfinClientFactory
 import com.johnw.reelfin.data.LibraryRepository
 import com.johnw.reelfin.data.SessionManager
+import com.johnw.reelfin.settings.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import org.koin.android.ext.android.inject
@@ -24,6 +25,7 @@ class ReelfinApp : Application(), SingletonImageLoader.Factory {
     val clients: JellyfinClientFactory by inject()
     val sessions: SessionManager by inject()
     val library: LibraryRepository by inject()
+    val settings: SettingsStore by inject()
 
     override fun onCreate() {
         super.onCreate()

@@ -21,7 +21,10 @@ import com.johnw.reelfin.playback.SegmentController
 import com.johnw.reelfin.playback.SegmentUi
 import com.johnw.reelfin.playback.StreamPlan
 import com.johnw.reelfin.playback.Trickplay
+import com.johnw.reelfin.data.isUnreachable
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,7 +78,7 @@ class PlayerViewModel(private val app: ReelfinApp, private val args: PlayerArgs)
     val api: ApiClient = session.api
     val authorizationHeader: String = app.clients.authorizationHeader(session.account.accessToken)
     private val userId: UUID = session.userId
-    val settings: PlaybackSettings = PlaybackPrefs(app).settings()
+    val settings: PlaybackSettings = app.settings.snapshot().playback()
     private val audioPolicy = AudioTrackPolicy(settings.preferAtmos)
     private val negotiator = PlaybackNegotiator(
         profile = { DeviceProfileBuilder(capabilities(app), audioPolicy).build(settings.maxStreamingBitrate) },
@@ -128,8 +131,9 @@ class PlayerViewModel(private val app: ReelfinApp, private val args: PlayerArgs)
                     ).withTracks(plan)
                 }
                 next = runCatching { app.library.nextEpisode(api, userId, item) }.getOrNull()
+                // The SDK reads response bodies on the calling thread: never call it from Main.
                 val segmentList = runCatching {
-                    api.mediaSegmentApi.getItemSegments(itemId).content.items.map(Segment::from)
+                    withContext(Dispatchers.IO) { api.mediaSegmentApi.getItemSegments(itemId).content.items.map(Segment::from) }
                 }.onFailure { Log.w(TAG, "No media segments", it) }.getOrDefault(emptyList())
                 val durationMs = (item.runTimeTicks ?: plan.runTimeTicks ?: 0L) / 10_000
                 segments = SegmentController(segmentList, durationMs, hasNext = next != null, settings)
@@ -138,7 +142,7 @@ class PlayerViewModel(private val app: ReelfinApp, private val args: PlayerArgs)
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Can't play $itemId", e)
-                _state.update { it.copy(loading = false, error = "Can't play this: ${e.message}") }
+                _state.update { it.copy(loading = false, error = errorMessage(e)) }
             }
         }
     }
@@ -201,6 +205,21 @@ class PlayerViewModel(private val app: ReelfinApp, private val args: PlayerArgs)
 
     fun clearNotice() = _state.update { it.copy(notice = null) }
 
+    /** OK on the error panel: try the same item again from where it stopped. */
+    fun retry() {
+        val itemId = controller.plan?.itemId ?: item?.id ?: args.itemId.toUUID()
+        val position = if (controller.plan != null) controller.player.currentPosition else args.startPositionMs
+        fallbackInProgress = false
+        play(itemId, position)
+    }
+
+    private fun errorMessage(e: Exception): String = when {
+        e.isUnreachable() -> "Can't reach the server. Check that it's running, then try again."
+        e is org.jellyfin.sdk.api.client.exception.InvalidStatusException && e.status == 401 -> "Your sign-in has expired."
+        e is org.jellyfin.sdk.api.client.exception.InvalidStatusException && e.status == 404 -> "This title is no longer on the server."
+        else -> "Can't play this right now (${e.message ?: e.javaClass.simpleName})."
+    }
+
     /** Asks the server for a new stream of the same item at the current position. */
     private fun renegotiate(
         tier: PlaybackTier? = null,
@@ -233,7 +252,7 @@ class PlayerViewModel(private val app: ReelfinApp, private val args: PlayerArgs)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(error = "Can't switch: ${e.message}") }
+                _state.update { it.copy(error = errorMessage(e)) }
             } finally {
                 fallbackInProgress = false
             }
@@ -244,7 +263,13 @@ class PlayerViewModel(private val app: ReelfinApp, private val args: PlayerArgs)
         Log.w(TAG, "Player error ${error.errorCodeName} at ${plan.tier}", error)
         val next = FallbackPolicy.onError(error.errorCode, plan.tier)
         if (next == null || fallbackInProgress) {
-            _state.update { it.copy(error = "Playback failed (${error.errorCodeName})") }
+            val status = (error.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
+            val text = when {
+                status != null -> "The server couldn't stream this file (HTTP $status). The file may be damaged or incomplete."
+                error.errorCode in NETWORK_ERRORS -> "Lost the connection to the server."
+                else -> "This title won't play on this device, even in compatibility mode (${error.errorCodeName})."
+            }
+            _state.update { it.copy(error = text) }
             return
         }
         fallbackInProgress = true
@@ -271,6 +296,9 @@ class PlayerViewModel(private val app: ReelfinApp, private val args: PlayerArgs)
     companion object {
         private const val TAG = "PlayerViewModel"
         private const val TICK_MS = 250L
+        private val NETWORK_ERRORS = setOf(
+            Media3Error.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED, Media3Error.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+        )
 
         @Volatile private var cachedCaps: com.johnw.reelfin.playback.DeviceCapabilities? = null
 

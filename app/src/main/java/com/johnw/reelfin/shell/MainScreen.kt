@@ -2,7 +2,25 @@ package com.johnw.reelfin.shell
 
 import android.app.Activity
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.tv.material3.Text
+import com.johnw.reelfin.data.ApiHealth
+import com.johnw.reelfin.ui.ActionButton
+import com.johnw.reelfin.ui.Reelfin
+import com.johnw.reelfin.ui.ReelfinType
+import org.koin.compose.koinInject
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -80,6 +98,24 @@ fun MainScreen(nav: AppNavigator, vm: MainViewModel = koinViewModel()) {
     val navRequester = remember { FocusRequester() }
     val holder = rememberSaveableStateHolder()
     val activity = LocalContext.current as? Activity
+    val health: ApiHealth = koinInject()
+    val unreachable by health.unreachable.collectAsStateWithLifecycle()
+    // Bumped to make the visible tab reload (Retry, or the server coming back).
+    var reload by remember { mutableIntStateOf(0) }
+    LaunchedEffect(unreachable) {
+        if (unreachable) {
+            // Keep trying quietly; any answer from the server clears the banner.
+            while (true) {
+                delay(RETRY_MS)
+                reload++
+            }
+        }
+    }
+    var wasUnreachable by remember { mutableStateOf(false) }
+    LaunchedEffect(unreachable) {
+        if (wasUnreachable && !unreachable) reload++
+        wasUnreachable = unreachable
+    }
 
     BackHandler {
         when {
@@ -107,17 +143,20 @@ fun MainScreen(nav: AppNavigator, vm: MainViewModel = koinViewModel()) {
                 Tab.Home -> {
                     val home: HomeViewModel = koinViewModel(key = "home")
                     RefreshOnReturn(home::refresh)
+                    ReloadOn(reload, home::refresh)
                     HomeScreen(home, actions.withList(home::toggleMyList))
                 }
                 Tab.Shows, Tab.Movies -> {
                     val lib: LibraryTabViewModel = koinViewModel(key = current.name) { parametersOf(current) }
                     RefreshOnReturn(lib::refresh)
+                    ReloadOn(reload, lib::refresh)
                     LibraryTabScreen(lib, actions.withList(lib::toggleMyList))
                 }
                 Tab.MyList, Tab.HomeVideos -> {
                     val kind = if (current == Tab.MyList) GridKind.MyList else GridKind.HomeVideos
                     val grid: GridViewModel = koinViewModel(key = kind.name) { parametersOf(kind) }
                     RefreshOnReturn(grid::refresh)
+                    ReloadOn(reload, grid::refresh)
                     GridScreen(grid, onOpen = actions.open, onPlay = actions.play)
                 }
             }
@@ -136,6 +175,9 @@ fun MainScreen(nav: AppNavigator, vm: MainViewModel = koinViewModel()) {
             currentTabRequester = navRequester,
             modifier = Modifier.onFocusChanged { navFocused = it.hasFocus },
         )
+        if (unreachable) {
+            OfflineBanner(vm.session.account.serverName, onRetry = { reload++ }, modifier = Modifier.align(Alignment.BottomCenter))
+        }
     }
     // Nothing focusable yet (still loading, or an empty tab): park focus on the nav.
     LaunchedEffect(current) {
@@ -155,6 +197,31 @@ fun openItem(nav: AppNavigator, item: BaseItemDto) {
 }
 
 private fun BrowseActions.withList(toggle: (BaseItemDto) -> Unit) = BrowseActions(open, play, toggle)
+
+@Composable
+private fun ReloadOn(tick: Int, refresh: () -> Unit) {
+    LaunchedEffect(tick) { if (tick > 0) refresh() }
+}
+
+/** "Can't reach the server" with a Retry button; the rows already on screen (or cached) stay usable. */
+@Composable
+private fun OfflineBanner(server: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .padding(bottom = 22.dp)
+            .background(Color(0xF01B1D22), RoundedCornerShape(10.dp))
+            .padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).background(Reelfin.colors.error, CircleShape))
+        Spacer(Modifier.width(10.dp))
+        Text("Can't reach $server. Showing what's saved; retrying…", style = ReelfinType.bodyStrong, color = Reelfin.colors.onBackground)
+        Spacer(Modifier.width(14.dp))
+        ActionButton("Retry", onClick = onRetry)
+    }
+}
+
+private const val RETRY_MS = 15_000L
 
 /** Refresh a tab when coming back from Details or the player (resume points, My List). */
 @Composable

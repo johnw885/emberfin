@@ -2,9 +2,14 @@ package com.johnw.reelfin.playback
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.util.Log
+import android.view.Surface
+import android.view.SurfaceHolder
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -17,7 +22,11 @@ import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import kotlinx.coroutines.CoroutineScope
@@ -30,6 +39,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.jellyfin.sdk.api.client.ApiClient
+import org.jellyfin.sdk.model.api.MediaStreamType
+import org.jellyfin.sdk.model.api.VideoRangeType
 
 /**
  * One ExoPlayer + Media3 [MediaSession] for the life of the player screen. Each [load] plays a
@@ -58,8 +69,16 @@ class PlaybackController(
         .setAllowCrossProtocolRedirects(true)
         .setDefaultRequestProperties(mapOf("Authorization" to authorizationHeader))
 
+    /** True while the current stream is Dolby Vision profile 7: decode its HDR10 base layer only. */
+    @Volatile private var dvBaseLayerOnly = false
+
+    private val codecSelector = MediaCodecSelector { mimeType, secure, tunneling ->
+        val mime = if (dvBaseLayerOnly && mimeType == MimeTypes.VIDEO_DOLBY_VISION) MimeTypes.VIDEO_H265 else mimeType
+        MediaCodecUtil.getDecoderInfos(mime, secure, tunneling)
+    }
+
     val player: ExoPlayer = ExoPlayer.Builder(context)
-        .setRenderersFactory(DefaultRenderersFactory(context).setEnableDecoderFallback(true))
+        .setRenderersFactory(DefaultRenderersFactory(context).setEnableDecoderFallback(true).setMediaCodecSelector(codecSelector))
         .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
@@ -89,12 +108,24 @@ class PlaybackController(
     private var progressJob: Job? = null
     private var released = false
 
+    private val frameRateMode = settings.frameRateMode
+    private var surface: Surface? = null
+    private var videoFrameRate: Float? = null
+
     init {
-        player.videoChangeFrameRateStrategy = if (settings.frameRateMatching) {
-            C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS
-        } else {
-            C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
+        // ALWAYS is done by us on the surface (see applyFrameRate), so ExoPlayer's own switching is off.
+        player.videoChangeFrameRateStrategy = when (frameRateMode) {
+            FrameRateMode.SEAMLESS -> C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS
+            FrameRateMode.OFF, FrameRateMode.ALWAYS -> C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
         }
+        player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onVideoInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
+                val streamRate = plan?.streams?.firstOrNull { it.type == MediaStreamType.VIDEO }?.let { it.realFrameRate ?: it.averageFrameRate }
+                videoFrameRate = FrameRatePolicy.target(format.frameRate, streamRate)
+                Log.i(TAG, "Video ${format.width}x${format.height} @ ${format.frameRate} fps (stream $streamRate), mode $frameRateMode")
+                applyFrameRate()
+            }
+        })
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             // A safety net before our explicit choice lands: prefer Dolby, never TrueHD/DTS.
             .setPreferredAudioMimeTypes(MimeTypes.AUDIO_E_AC3_JOC, MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_AC3, MimeTypes.AUDIO_AAC)
@@ -132,10 +163,44 @@ class PlaybackController(
         })
     }
 
+    /** The player screen's SurfaceView holder. Video goes there; ALWAYS mode sets its frame rate. */
+    fun attachSurface(holder: SurfaceHolder) {
+        player.setVideoSurfaceHolder(holder)
+    }
+
+    fun detachSurface(holder: SurfaceHolder) {
+        surface = null
+        player.clearVideoSurfaceHolder(holder)
+    }
+
+    /** Called by the SurfaceView's callback when its surface is created (or destroyed: null). */
+    fun onSurface(value: Surface?) {
+        surface = value
+        applyFrameRate()
+    }
+
+    private fun applyFrameRate() {
+        if (frameRateMode != FrameRateMode.ALWAYS || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val s = surface?.takeIf { it.isValid } ?: return
+        val rate = videoFrameRate ?: return
+        runCatching { s.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE, Surface.CHANGE_FRAME_RATE_ALWAYS) }
+            .onSuccess { Log.i(TAG, "Asked the display for $rate Hz (always)") }
+            .onFailure { Log.w(TAG, "setFrameRate failed", it) }
+    }
+
+    private fun clearFrameRate() {
+        if (frameRateMode != FrameRateMode.ALWAYS || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        surface?.takeIf { it.isValid }?.let { s ->
+            runCatching { s.setFrameRate(0f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT, Surface.CHANGE_FRAME_RATE_ALWAYS) }
+        }
+    }
+
     /** Plays [plan] from [startMs], ending the previous stream's reporting first. */
     fun load(plan: StreamPlan, startMs: Long, title: String, subtitle: String? = null) {
         finishReporting(failed = false)
         this.plan = plan
+        dvBaseLayerOnly = !plan.isTranscoding &&
+            DolbyVisionPolicy.decodeBaseLayerOnly(plan.streams.firstOrNull { it.type == MediaStreamType.VIDEO }?.videoRangeType)
         audioIndex = plan.audioStreamIndex
         subtitleIndex = plan.subtitleStreamIndex?.takeIf { it >= 0 }
         reporter = ProgressReporter(api, plan)
@@ -266,11 +331,34 @@ class PlaybackController(
         if (released) return
         finishReporting(failed = player.playerError != null)
         released = true
+        clearFrameRate()
         mediaSession.release()
         player.release()
     }
 
     private companion object {
+        const val TAG = "PlaybackController"
         var sessionCounter = 0
     }
+}
+
+/** Dolby Vision streams the player decodes as plain HEVC (their HDR10 base layer). Pure, so it's unit-tested. */
+object DolbyVisionPolicy {
+    /**
+     * Profile 7 (dual layer). No TV decoder handles its enhancement layer properly, and the server
+     * can only get rid of it with a full software transcode, so we direct-play and let the HEVC
+     * decoder skip the enhancement-layer NAL units: the picture is the HDR10 base layer.
+     */
+    fun decodeBaseLayerOnly(range: VideoRangeType?): Boolean =
+        range == VideoRangeType.DOVI_WITH_EL || range == VideoRangeType.DOVI_WITH_ELHDR10_PLUS
+}
+
+/** Which refresh rate to ask the display for. Pure, so it's unit-tested. */
+object FrameRatePolicy {
+    /**
+     * The decoder's [formatRate] when the container states one, otherwise the server's [streamRate]
+     * (Jellyfin's RealFrameRate). Null when neither is known or the value is implausible.
+     */
+    fun target(formatRate: Float, streamRate: Float?): Float? =
+        formatRate.takeIf { it in 1f..240f } ?: streamRate?.takeIf { it in 1f..240f }
 }

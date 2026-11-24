@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.johnw.reelfin.data.ActiveSession
 import com.johnw.reelfin.data.LibraryRepository
+import com.johnw.reelfin.data.isUnreachable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -63,4 +64,18 @@ abstract class BrowseViewModel(protected val library: LibraryRepository, val ses
     }
 
     protected open fun onError(e: Exception) {}
+
+    /**
+     * A part of a screen that may fail on its own (one row, the billboard): [default] on an
+     * ordinary error. A lost connection is rethrown so the whole refresh fails and keeps what's on
+     * screen and in the cache, instead of replacing it with empty rows.
+     */
+    protected suspend fun <T> optional(default: T, block: suspend () -> T): T = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        if (e.isUnreachable()) throw e
+        default
+    }
 }

@@ -4,6 +4,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    // Collects every dependency's licence at build time for Settings → About (res/raw/aboutlibraries.json).
+    alias(libs.plugins.aboutlibraries.android)
 }
 
 // DEV_SERVER_URL lives in the git-ignored local.properties and only reaches debug builds,
@@ -50,6 +52,11 @@ android {
     testOptions.unitTests.isReturnDefaultValues = true
 }
 
+// No network during builds: licence texts come from the plugin's bundled SPDX set.
+aboutLibraries {
+    offlineMode = true
+}
+
 dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:ui"))
@@ -71,6 +78,8 @@ dependencies {
     implementation(libs.koin.androidx.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.aboutlibraries.core)
 
     testImplementation(libs.junit)
 }

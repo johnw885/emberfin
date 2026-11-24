@@ -1,6 +1,7 @@
 package com.johnw.reelfin
 
 import com.johnw.reelfin.data.AccountStore
+import com.johnw.reelfin.data.ApiHealth
 import com.johnw.reelfin.data.AuthRepository
 import com.johnw.reelfin.data.JellyfinClientFactory
 import com.johnw.reelfin.data.LibraryRepository
@@ -18,6 +19,9 @@ import com.johnw.reelfin.library.GridViewModel
 import com.johnw.reelfin.library.LibraryTabViewModel
 import com.johnw.reelfin.profiles.AddProfileViewModel
 import com.johnw.reelfin.profiles.ProfilesViewModel
+import com.johnw.reelfin.search.SearchViewModel
+import com.johnw.reelfin.settings.SettingsStore
+import com.johnw.reelfin.settings.SettingsViewModel
 import com.johnw.reelfin.shell.MainViewModel
 import com.johnw.reelfin.shell.Tab
 import org.koin.core.module.dsl.viewModel
@@ -29,12 +33,14 @@ import org.koin.dsl.module
  */
 fun appModule(app: ReelfinApp) = module {
     single { app.appScope }
+    single { ApiHealth() }
     single { SessionStore(get()) }
     single { AccountStore(get()) }
-    single { JellyfinClientFactory(get(), get(), BuildConfig.VERSION_NAME) }
+    single { SettingsStore(get(), get()) }
+    single { JellyfinClientFactory(get(), get(), BuildConfig.VERSION_NAME, get()) }
     single { ServerRepository(get()) }
     single { AuthRepository(get()) }
-    single { SessionManager(get(), get(), get()) }
+    single { SessionManager(get(), get(), get(), get(), get()) }
     single { LibraryRepository() }
     single { ReelfinDatabase.create(get()) }
     single<RowCache> { RoomRowCache(get<ReelfinDatabase>().screenCache()) }
@@ -47,4 +53,6 @@ fun appModule(app: ReelfinApp) = module {
     viewModel { (kind: GridKind) -> GridViewModel(get(), get<SessionManager>().require(), kind) }
     viewModel { (itemId: String) -> DetailsViewModel(get(), get<SessionManager>().require(), itemId) }
     viewModel { (personId: String) -> PersonViewModel(get(), get<SessionManager>().require(), personId) }
+    viewModel { SearchViewModel(get(), get<SessionManager>().require()) }
+    viewModel { SettingsViewModel(get(), get(), get<SessionManager>().require()) }
 }

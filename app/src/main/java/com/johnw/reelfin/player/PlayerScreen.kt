@@ -37,8 +37,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.media3.common.Player
-import androidx.media3.ui.compose.ContentFrame
-import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.viewinterop.AndroidView
+import com.johnw.reelfin.playback.PlaybackController
 import com.johnw.reelfin.ReelfinApp
 import com.johnw.reelfin.playback.SegmentUi
 import kotlinx.coroutines.delay
@@ -96,6 +100,15 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
     var playing by remember { mutableStateOf(true) }
     var buffering by remember { mutableStateOf(true) }
     var aspect by remember { mutableFloatStateOf(16f / 9f) }
+    var firstFrame by remember { mutableStateOf(false) }
+    DisposableEffect(player) {
+        val l = object : Player.Listener {
+            override fun onRenderedFirstFrame() { firstFrame = true }
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) { firstFrame = false }
+        }
+        player.addListener(l)
+        onDispose { player.removeListener(l) }
+    }
 
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
     LaunchedEffect(player) {
@@ -189,7 +202,11 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
             }
             return true
         }
-        if (state.error != null || !handled) return handled
+        if (state.error != null) {
+            if (code in OK_KEYS) vm.retry()
+            return handled
+        }
+        if (!handled) return handled
 
         if (menuOpen) {
             val rows = if (menuColumn == 0) state.audioTracks.size else subtitleOptions.size
@@ -265,7 +282,7 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
             .focusable()
             .onKeyEvent(::onKey),
     ) {
-        ContentFrame(player = player, modifier = Modifier.fillMaxSize(), surfaceType = SURFACE_TYPE_SURFACE_VIEW)
+        VideoSurface(vm.controller, aspect, firstFrame)
         val overlayVisible = (overlay || !playing) && !state.loading && state.error == null
         SubtitleLayer(cues, aspect, prefs.subtitleScale, prefs.subtitleBackground, liftForOverlay = overlayVisible)
 
@@ -290,6 +307,7 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
     }
 }
 
+private val OK_KEYS = setOf(AndroidKey.KEYCODE_DPAD_CENTER, AndroidKey.KEYCODE_ENTER, AndroidKey.KEYCODE_NUMPAD_ENTER)
 private const val SCRUB_COMMIT_MS = 800L
 private const val OVERLAY_HIDE_MS = 5_000L
 
@@ -297,3 +315,29 @@ private val HANDLED_KEYS = setOf(
     AndroidKey.KEYCODE_DPAD_LEFT, AndroidKey.KEYCODE_DPAD_RIGHT, AndroidKey.KEYCODE_DPAD_UP, AndroidKey.KEYCODE_DPAD_DOWN,
     AndroidKey.KEYCODE_DPAD_CENTER, AndroidKey.KEYCODE_ENTER, AndroidKey.KEYCODE_NUMPAD_ENTER, AndroidKey.KEYCODE_BACK,
 )
+
+/**
+ * The video: a SurfaceView (needed for HDR/Dolby Vision) sized to the picture's aspect ratio. We own
+ * the view rather than using media3-ui-compose's ContentFrame so the frame-rate "Always" mode can
+ * call `Surface.setFrameRate` on it. Black until the first frame is drawn.
+ */
+@Composable
+private fun VideoSurface(controller: PlaybackController, aspect: Float, firstFrame: Boolean) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        AndroidView(
+            factory = { ctx ->
+                SurfaceView(ctx).also { view ->
+                    view.holder.addCallback(object : SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: SurfaceHolder) = controller.onSurface(holder.surface)
+                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+                        override fun surfaceDestroyed(holder: SurfaceHolder) = controller.onSurface(null)
+                    })
+                    controller.attachSurface(view.holder)
+                }
+            },
+            onRelease = { view -> controller.detachSurface(view.holder) },
+            modifier = Modifier.aspectRatio(aspect.coerceIn(0.5f, 4f)),
+        )
+        if (!firstFrame) Box(Modifier.fillMaxSize().background(Color.Black))
+    }
+}

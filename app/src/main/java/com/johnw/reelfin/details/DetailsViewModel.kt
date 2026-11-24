@@ -76,7 +76,7 @@ class DetailsViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(error = "Couldn't load this title: ${e.message}") }
+                _state.update { it.copy(error = com.johnw.reelfin.home.loadError("this title", e)) }
             }
         }
     }

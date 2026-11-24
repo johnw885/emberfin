@@ -20,8 +20,10 @@ import org.jellyfin.sdk.model.api.VideoRangeType
  * Turns [DeviceCapabilities] into the Jellyfin `DeviceProfile` sent with every PlaybackInfo request.
  *
  * - Direct play only lists codecs the device decodes; audio never lists TrueHD/MLP/DTS.
- * - Video range types: Dolby Vision profiles with an enhancement layer (P7 FEL) and invalid DV
- *   are never declared, so the server strips them to their HDR10 base layer.
+ * - Video range types: Dolby Vision profile 7 (with an enhancement layer) is declared on HDR10
+ *   displays and direct-played: the player decodes only its HDR10 base layer with the plain HEVC
+ *   decoder (see PlaybackController). The server can't strip the layer by remuxing; it would
+ *   software-transcode 4K instead. Invalid DV is never declared, so the server remuxes it to HDR10.
  * - Transcodes are HLS fMP4 with HEVC/H.264 video and E-AC-3/AC-3/AAC audio.
  */
 class DeviceProfileBuilder(
@@ -92,12 +94,15 @@ class DeviceProfileBuilder(
             if (hdr10) {
                 add(VideoRangeType.DOVI_WITH_HDR10)
                 add(VideoRangeType.DOVI_WITH_HDR10_PLUS)
+                // Profile 7: played as its HDR10 base layer (enhancement layer ignored by the HEVC decoder).
+                add(VideoRangeType.DOVI_WITH_EL)
+                add(VideoRangeType.DOVI_WITH_ELHDR10_PLUS)
             }
             if (HdrFormat.HLG in caps.hdr) add(VideoRangeType.DOVI_WITH_HLG)
             // Profile 5 has no fallback layer, so it needs real DV.
             if (dv) add(VideoRangeType.DOVI)
         }
-        // Never: DOVI_WITH_EL, DOVI_WITH_ELHDR10_PLUS (P7 FEL) and DOVI_INVALID.
+        // Never: DOVI_INVALID (the server remuxes it to HDR10, which works).
     }
 
     private fun videoCodecProfile(decoder: VideoDecoder): CodecProfile {

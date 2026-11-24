@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose) apply false
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.ksp) apply false
+    alias(libs.plugins.aboutlibraries.android) apply false
 }
 
 // The source folder may sync to a cloud drive; keep Gradle build output outside it to avoid

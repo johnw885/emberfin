@@ -260,7 +260,7 @@ fun BoxScope.ErrorPanel(text: String) {
     ) {
         Text(text, color = Color(0xFFFF8A80), fontSize = 20.sp)
         Spacer(Modifier.height(12.dp))
-        Text("Press Back to exit", color = ReelfinColors.Muted, fontSize = 16.sp)
+        Text("OK to try again  ·  Back to exit", color = ReelfinColors.Muted, fontSize = 16.sp)
     }
 }
 

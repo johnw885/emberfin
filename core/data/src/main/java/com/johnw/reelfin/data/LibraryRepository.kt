@@ -144,6 +144,23 @@ class LibraryRepository {
         sortBy = listOf(ItemSortBy.PREMIERE_DATE), order = SortOrder.DESCENDING, limit = 100,
     ).items
 
+    /** Search titles: movies and series first (posters), then episodes and home videos. */
+    suspend fun search(s: ActiveSession, term: String, limit: Int = 60): List<BaseItemDto> = io {
+        s.api.libraryApi.getItems(
+            GetItemsRequest(
+                userId = s.userId, searchTerm = term, recursive = true, limit = limit,
+                includeItemTypes = SearchKinds, fields = listFields, enableUserData = true,
+                enableImageTypes = imageTypes, imageTypeLimit = 1, enableTotalRecordCount = false,
+            ),
+        ).content.items
+    }
+
+    /** Search suggestions before anything is typed: the newest movies and series. */
+    suspend fun recentlyAdded(s: ActiveSession, limit: Int = 21): List<BaseItemDto> = items(
+        s, kinds = listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES), sortBy = listOf(ItemSortBy.DATE_CREATED),
+        order = SortOrder.DESCENDING, limit = limit,
+    ).items
+
     suspend fun item(s: ActiveSession, itemId: UUID): BaseItemDto = item(s.api, s.userId, itemId)
 
     /** Local trailers (Session S downloads one per title). */
@@ -217,6 +234,7 @@ class LibraryRepository {
         val MovieKinds = listOf(BaseItemKind.MOVIE)
         val ShowKinds = listOf(BaseItemKind.SERIES)
         val HomeVideoKinds = listOf(BaseItemKind.VIDEO, BaseItemKind.MOVIE)
+        val SearchKinds = listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES, BaseItemKind.EPISODE, BaseItemKind.VIDEO)
 
         fun isMovies(view: BaseItemDto) = view.collectionType == CollectionType.MOVIES
         fun isShows(view: BaseItemDto) = view.collectionType == CollectionType.TVSHOWS

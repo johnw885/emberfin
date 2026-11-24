@@ -41,13 +41,13 @@ class DeviceProfileBuilderTest {
         assertTrue("mkv" in dp.container.split(","))
     }
 
-    @Test fun `DV P5 and P8 declared, P7 FEL and invalid DV left out`() {
+    @Test fun `DV P5, P7 and P8 declared, invalid DV left out`() {
         val ranges = DeviceProfileBuilder(streamer).build(120_000_000).rangeTypesFor("hevc")
         listOf(VideoRangeType.SDR, VideoRangeType.HDR10, VideoRangeType.HDR10_PLUS, VideoRangeType.HLG, VideoRangeType.DOVI,
-            VideoRangeType.DOVI_WITH_HDR10, VideoRangeType.DOVI_WITH_HDR10_PLUS, VideoRangeType.DOVI_WITH_HLG, VideoRangeType.DOVI_WITH_SDR)
+            VideoRangeType.DOVI_WITH_HDR10, VideoRangeType.DOVI_WITH_HDR10_PLUS, VideoRangeType.DOVI_WITH_HLG, VideoRangeType.DOVI_WITH_SDR,
+            VideoRangeType.DOVI_WITH_EL, VideoRangeType.DOVI_WITH_ELHDR10_PLUS)
             .forEach { assertTrue(it.serialName, it.serialName in ranges) }
-        listOf(VideoRangeType.DOVI_WITH_EL, VideoRangeType.DOVI_WITH_ELHDR10_PLUS, VideoRangeType.DOVI_INVALID)
-            .forEach { assertFalse(it.serialName, it.serialName in ranges) }
+        assertFalse(VideoRangeType.DOVI_INVALID.serialName in ranges)
     }
 
     @Test fun `range type names match the server's spelling`() {

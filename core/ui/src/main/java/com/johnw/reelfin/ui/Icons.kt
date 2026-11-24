@@ -58,6 +58,18 @@ object ReelfinIcons {
 
     val Back = icon("back") { stroke { moveTo(15f, 4.5f); lineTo(7.5f, 12f); lineTo(15f, 19.5f) } }
 
+    val Mic = icon("mic") {
+        stroke(2.2f) { moveTo(9f, 6f); arcTo(3f, 3f, 0f, false, true, 15f, 6f); lineTo(15f, 11f); arcTo(3f, 3f, 0f, false, true, 9f, 11f); close() }
+        stroke(2f) { moveTo(5.5f, 10.5f); arcTo(6.5f, 6.5f, 0f, false, false, 18.5f, 10.5f); moveTo(12f, 17f); lineTo(12f, 20.5f) }
+    }
+
+    val Backspace = icon("backspace") {
+        stroke(2f) { moveTo(8f, 5f); lineTo(20f, 5f); lineTo(20f, 19f); lineTo(8f, 19f); lineTo(2.5f, 12f); close() }
+        stroke(2.2f) { moveTo(11f, 9f); lineTo(16f, 15f); moveTo(16f, 9f); lineTo(11f, 15f) }
+    }
+
+    val Space = icon("space") { stroke(2.4f) { moveTo(4f, 11f); lineTo(4f, 15f); lineTo(20f, 15f); lineTo(20f, 11f) } }
+
     val Episodes = icon("episodes") {
         stroke(2f) { moveTo(3.5f, 6f); lineTo(20.5f, 6f); moveTo(3.5f, 12f); lineTo(20.5f, 12f); moveTo(3.5f, 18f); lineTo(14f, 18f) }
     }

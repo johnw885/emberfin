@@ -67,7 +67,7 @@ class GridViewModel(library: LibraryRepository, session: ActiveSession, val kind
     }
 
     override fun onError(e: Exception) {
-        _state.update { it.copy(loading = false, error = "Couldn't load ${kind.title}: ${e.message}") }
+        _state.update { it.copy(loading = false, error = com.johnw.reelfin.home.loadError(kind.title, e)) }
     }
 }
 
