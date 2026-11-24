@@ -54,6 +54,8 @@ data class PlaybackRequest(
     /** null = server default, -1 = off. */
     val subtitleStreamIndex: Int? = null,
     val startPositionMs: Long = 0,
+    /** The series' remembered choice; used only where the index above is null. */
+    val trackPreference: TrackPreference? = null,
 )
 
 class PlaybackException(message: String) : Exception(message)
@@ -71,12 +73,13 @@ class PlaybackNegotiator(
         var info = fetch(api, request)
         val source = info.mediaSources.firstOrNull { request.mediaSourceId == null || it.id == request.mediaSourceId }
             ?: throw PlaybackException("This item has no playable file")
-        val wanted = request.audioStreamIndex ?: when (val choice = audioPolicy.choose(source.mediaStreams.orEmpty(), preferredLanguage(source))) {
+        val remembered = TrackMemory.resolve(request.trackPreference, source.mediaStreams.orEmpty(), audioPolicy)
+        val wanted = request.audioStreamIndex ?: remembered.audioIndex ?: when (val choice = audioPolicy.choose(source.mediaStreams.orEmpty(), preferredLanguage(source))) {
             is AudioChoice.Track -> choice.index
             is AudioChoice.TranscodeFrom -> choice.index
             AudioChoice.None -> null
         }
-        val subtitle = request.subtitleStreamIndex ?: source.defaultSubtitleStreamIndex ?: -1
+        val subtitle = request.subtitleStreamIndex ?: remembered.subtitleIndex ?: source.defaultSubtitleStreamIndex ?: -1
         val resolved = request.copy(mediaSourceId = source.id, audioStreamIndex = wanted, subtitleStreamIndex = subtitle)
         if (resolved != request) info = fetch(api, resolved)
         decide(info, resolved, api.baseUrl.orEmpty()) { src, playSessionId ->

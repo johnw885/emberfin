@@ -82,6 +82,7 @@ fun BoxScope.PlayerOverlay(
         SeekBar(positionMs, durationMs, focused = focus == PlayerFocus.SEEK_BAR, scrubbing = scrubbing, trickplay = trickplay)
         Spacer(Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (state.isEpisode) OverlayButton("Episodes", focus == PlayerFocus.EPISODES)
             OverlayButton("Audio & Subtitles", focus == PlayerFocus.AUDIO_SUBS)
             if (state.nextTitle != null) OverlayButton("Next Episode", focus == PlayerFocus.NEXT_EPISODE)
             Spacer(Modifier.weight(1f))
@@ -186,7 +187,7 @@ fun BoxScope.SegmentPills(state: PlayerUiState, focused: Boolean, overlayVisible
                 Text("Back to keep watching", color = EmberfinColors.Muted, fontSize = 14.sp)
             }
         }
-        SegmentUi.None -> Unit
+        SegmentUi.None, SegmentUi.Credits -> Unit
     }
 }
 

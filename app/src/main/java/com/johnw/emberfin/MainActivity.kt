@@ -24,6 +24,7 @@ class MainActivity : ComponentActivity() {
     private val debugPlay = Channel<PlayerRoute>(Channel.CONFLATED)
     private val settings: SettingsStore by inject()
     private val health: com.johnw.emberfin.data.ApiHealth by inject()
+    private val remote: com.johnw.emberfin.remote.RemoteControl by inject()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,9 +33,20 @@ class MainActivity : ComponentActivity() {
             EmberfinTheme {
                 Box(Modifier.fillMaxSize().background(EmberfinColors.Background)) {
                     EmberfinNavHost(rememberNavController(), debugPlay.receiveAsFlow())
+                    com.johnw.emberfin.remote.RemoteMessageBanner(remote)
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        remote.setForeground(true)
+    }
+
+    override fun onStop() {
+        remote.setForeground(false)
+        super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -60,6 +72,9 @@ class MainActivity : ComponentActivity() {
                 lifecycleScope.launch { settings.update { it.copy(frameRateMode = mode) } }
             }
         }
+        // `--ei still_watching_episodes <n>` / `--el still_watching_idle_ms <ms>`: ask sooner, for testing the prompt.
+        if (intent.hasExtra("still_watching_episodes")) com.johnw.emberfin.player.PlayerViewModel.debugStillWatchingEpisodes = intent.getIntExtra("still_watching_episodes", 0).takeIf { it > 0 }
+        if (intent.hasExtra("still_watching_idle_ms")) com.johnw.emberfin.player.PlayerViewModel.debugStillWatchingIdleMs = intent.getLongExtra("still_watching_idle_ms", 0L).takeIf { it > 0 }
         val id = intent.getStringExtra("play_item_id") ?: return
         debugPlay.trySend(PlayerRoute(id, intent.getLongExtra("start_ms", 0L)))
     }

@@ -37,7 +37,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.media3.common.Player
-import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.Alignment
@@ -48,7 +47,7 @@ import com.johnw.emberfin.playback.SegmentUi
 import kotlinx.coroutines.delay
 
 /** Which overlay control the D-pad is on. The screen keeps a single Compose focus target and tracks this itself. */
-enum class PlayerFocus { SEEK_BAR, AUDIO_SUBS, NEXT_EPISODE, PILL }
+enum class PlayerFocus { SEEK_BAR, EPISODES, AUDIO_SUBS, NEXT_EPISODE, PILL }
 
 /**
  * The player. Entry point for every "play" action:
@@ -57,7 +56,7 @@ enum class PlayerFocus { SEEK_BAR, AUDIO_SUBS, NEXT_EPISODE, PILL }
  * "stopped" report) and exits by itself when the app goes to the background.
  */
 @Composable
-fun PlayerScreen(args: PlayerArgs, onExit: () -> Unit) {
+fun PlayerScreen(args: PlayerArgs, onExit: () -> Unit, onOpen: (itemId: String) -> Unit = {}) {
     val app = LocalContext.current.applicationContext as EmberfinApp
     val owner = remember(args) { object : ViewModelStoreOwner { override val viewModelStore = ViewModelStore() } }
     DisposableEffect(owner) { onDispose { owner.viewModelStore.clear() } }
@@ -73,13 +72,18 @@ fun PlayerScreen(args: PlayerArgs, onExit: () -> Unit) {
 
     CompositionLocalProvider(LocalViewModelStoreOwner provides owner) {
         val vm: PlayerViewModel = viewModel(factory = viewModelFactory { initializer { PlayerViewModel(app, args) } })
-        PlayerContent(vm, onExit)
+        PlayerContent(vm, onExit, onOpen)
     }
 }
 
 @Composable
-private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
+private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit, onOpen: (String) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val episodes by vm.episodes.collectAsStateWithLifecycle()
+    var episodesRow by remember { mutableStateOf(EpisodesRow.EPISODES) }
+    var episodeFocus by remember { mutableIntStateOf(0) }
+    var postFocus by remember { mutableIntStateOf(0) }
+    var promptFocus by remember { mutableIntStateOf(0) }
     val cues by vm.controller.cues.collectAsStateWithLifecycle()
     val player = vm.controller.player
     val focusRequester = remember { FocusRequester() }
@@ -133,8 +137,8 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
     }
 
     // Auto-hide the overlay while playing.
-    LaunchedEffect(lastInput, overlay, playing, menuOpen, scrubTarget) {
-        if (overlay && playing && !menuOpen && scrubTarget == null) {
+    LaunchedEffect(lastInput, overlay, playing, menuOpen, scrubTarget, episodes == null) {
+        if (overlay && playing && !menuOpen && scrubTarget == null && episodes == null) {
             delay(OVERLAY_HIDE_MS)
             overlay = false
             if (focus != PlayerFocus.PILL) focus = PlayerFocus.SEEK_BAR
@@ -143,12 +147,29 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
 
     // The skip pill / next-up card takes focus, unless the user is scrubbing or in the menus.
     LaunchedEffect(state.segment) {
-        val pill = state.segment != SegmentUi.None
+        val pill = state.segment is SegmentUi.SkipButton || state.segment is SegmentUi.NextUp
         if (pill && scrubTarget == null && !menuOpen && !(overlay && focus != PlayerFocus.SEEK_BAR)) focus = PlayerFocus.PILL
         if (!pill && focus == PlayerFocus.PILL) focus = PlayerFocus.SEEK_BAR
     }
 
     LaunchedEffect(state.finished) { if (state.finished) onExit() }
+
+    // Episodes panel: start on the episode that's playing.
+    val panelEpisodes = episodes?.episodes
+    LaunchedEffect(panelEpisodes) {
+        val list = panelEpisodes ?: return@LaunchedEffect
+        episodeFocus = list.indexOfFirst { it.current }.coerceAtLeast(0)
+    }
+    LaunchedEffect(episodes == null) { if (episodes != null) episodesRow = EpisodesRow.EPISODES }
+    LaunchedEffect(state.postPlay?.ended, state.postPlay == null) { postFocus = 0 }
+    LaunchedEffect(state.stillWatching) { promptFocus = 0 }
+    // A phone paused, seeked or changed a track: show where things are.
+    LaunchedEffect(state.remotePing) {
+        if (state.remotePing > 0) {
+            overlay = true
+            lastInput = System.currentTimeMillis()
+        }
+    }
     LaunchedEffect(state.notice) {
         if (state.notice != null) {
             delay(5_000)
@@ -184,17 +205,62 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
 
     val subtitleOptions = listOf<TrackOption?>(null) + state.subtitleTracks
 
+    /** Keys while "Are you still watching?" is up. */
+    fun onPromptKey(code: Int) {
+        when (code) {
+            AndroidKey.KEYCODE_DPAD_LEFT -> promptFocus = 0
+            AndroidKey.KEYCODE_DPAD_RIGHT -> promptFocus = 1
+            in OK_KEYS -> if (promptFocus == 0) vm.continueWatching() else onExit()
+        }
+    }
+
+    /** Keys while the Episodes panel is open. */
+    fun onEpisodesKey(code: Int, panel: EpisodesPanel) {
+        when (code) {
+            AndroidKey.KEYCODE_DPAD_UP -> if (panel.seasons.size > 1) episodesRow = EpisodesRow.SEASONS
+            AndroidKey.KEYCODE_DPAD_DOWN -> episodesRow = EpisodesRow.EPISODES
+            AndroidKey.KEYCODE_DPAD_LEFT, AndroidKey.KEYCODE_DPAD_RIGHT -> {
+                val step = if (code == AndroidKey.KEYCODE_DPAD_RIGHT) 1 else -1
+                if (episodesRow == EpisodesRow.SEASONS) vm.showSeason((panel.season + step).coerceIn(0, panel.seasons.lastIndex))
+                else episodeFocus = (episodeFocus + step).coerceIn(0, (panel.episodes.size - 1).coerceAtLeast(0))
+            }
+            in OK_KEYS -> when (episodesRow) {
+                EpisodesRow.SEASONS -> episodesRow = EpisodesRow.EPISODES
+                EpisodesRow.EPISODES -> panel.episodes.getOrNull(episodeFocus)?.let {
+                    vm.playEpisode(it.id)
+                    overlay = false
+                }
+            }
+        }
+    }
+
+    /** Keys while "More like this" is up. */
+    fun onPostPlayKey(code: Int, post: PostPlay) {
+        when (code) {
+            AndroidKey.KEYCODE_DPAD_LEFT -> postFocus = (postFocus - 1).coerceAtLeast(0)
+            AndroidKey.KEYCODE_DPAD_RIGHT -> postFocus = (postFocus + 1).coerceAtMost(post.items.lastIndex)
+            in OK_KEYS -> post.items.getOrNull(postFocus)?.let { onOpen(it.id) }
+        }
+    }
+
     fun onKey(ev: KeyEvent): Boolean {
         val native = ev.nativeKeyEvent
         val code = native.keyCode
         val handled = code in HANDLED_KEYS
         if (ev.type != KeyEventType.KeyDown) return handled
         lastInput = System.currentTimeMillis()
+        vm.onUserInput()
 
+        val panel = episodes
+        val post = state.postPlay
         if (code == AndroidKey.KEYCODE_BACK) {
             when {
                 state.error != null -> onExit()
+                state.stillWatching != null -> onExit()
                 menuOpen -> menuOpen = false
+                panel != null -> vm.closeEpisodes()
+                post != null && post.ended -> onExit()
+                post != null -> vm.dismissSegment()
                 scrubTarget != null -> { scrubTarget = null; vm.userSeeking = false }
                 focus == PlayerFocus.PILL && state.segment != SegmentUi.None -> { vm.dismissSegment(); focus = PlayerFocus.SEEK_BAR }
                 overlay && playing -> { overlay = false; focus = PlayerFocus.SEEK_BAR }
@@ -207,6 +273,10 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
             return handled
         }
         if (!handled) return handled
+
+        if (state.stillWatching != null) return true.also { onPromptKey(code) }
+        if (panel != null) return true.also { onEpisodesKey(code, panel) }
+        if (post != null) return true.also { onPostPlayKey(code, post) }
 
         if (menuOpen) {
             val rows = if (menuColumn == 0) state.audioTracks.size else subtitleOptions.size
@@ -231,6 +301,7 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
         }
 
         val buttons = buildList {
+            if (state.isEpisode) add(PlayerFocus.EPISODES)
             add(PlayerFocus.AUDIO_SUBS)
             if (state.nextTitle != null) add(PlayerFocus.NEXT_EPISODE)
         }
@@ -251,7 +322,7 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
                 showOverlay()
             }
             AndroidKey.KEYCODE_DPAD_DOWN -> {
-                if (overlay && focus == PlayerFocus.SEEK_BAR && scrubTarget == null) focus = PlayerFocus.AUDIO_SUBS
+                if (overlay && focus == PlayerFocus.SEEK_BAR && scrubTarget == null) focus = buttons.first()
                 else if (!overlay || focus == PlayerFocus.PILL) focus = PlayerFocus.SEEK_BAR
                 showOverlay()
             }
@@ -265,6 +336,10 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
                     menuRow = state.audioTracks.indexOfFirst { it.index == state.selectedAudio }.coerceAtLeast(0)
                 }
                 onButtons && focus == PlayerFocus.NEXT_EPISODE -> vm.playNext()
+                onButtons && focus == PlayerFocus.EPISODES -> {
+                    vm.openEpisodes()
+                    focus = PlayerFocus.SEEK_BAR
+                }
                 else -> {
                     vm.controller.togglePlayPause()
                     showOverlay()
@@ -283,8 +358,14 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
             .onKeyEvent(::onKey),
     ) {
         VideoSurface(vm.controller, aspect, firstFrame)
-        val overlayVisible = (overlay || !playing) && !state.loading && state.error == null
-        SubtitleLayer(cues, aspect, prefs.subtitleScale, prefs.subtitleBackground, liftForOverlay = overlayVisible)
+        val panel = episodes
+        val post = state.postPlay
+        val prompt = state.stillWatching
+        val overlayVisible = (overlay || !playing) && !state.loading && state.error == null && panel == null && post == null && prompt == null
+        // Subtitles would draw through the panels, so they pause while one is up.
+        if (panel == null && post == null && prompt == null) {
+            SubtitleLayer(cues, aspect, prefs.subtitleScale, prefs.subtitleBackground, liftForOverlay = overlayVisible)
+        }
 
         if (overlayVisible) {
             PlayerOverlay(
@@ -299,8 +380,11 @@ private fun PlayerContent(vm: PlayerViewModel, onExit: () -> Unit) {
                 },
             )
         }
-        SegmentPills(state, focused = focus == PlayerFocus.PILL, overlayVisible = overlayVisible)
-        if (state.loading || (buffering && state.error == null)) LoadingBadge(state.loading)
+        if (panel == null && post == null && prompt == null) SegmentPills(state, focused = focus == PlayerFocus.PILL, overlayVisible = overlayVisible)
+        panel?.let { EpisodesPanelView(it, episodesRow, episodeFocus) }
+        post?.let { PostPlayView(it, postFocus) }
+        prompt?.let { StillWatchingView(it, promptFocus) }
+        if (state.loading || (buffering && state.error == null && post?.ended != true && prompt == null)) LoadingBadge(state.loading)
         state.notice?.let { Notice(it) }
         state.error?.let { ErrorPanel(it) }
         if (menuOpen) TrackMenu(state, subtitleOptions, menuColumn, menuRow)
@@ -317,27 +401,30 @@ private val HANDLED_KEYS = setOf(
 )
 
 /**
- * The video: a SurfaceView (needed for HDR/Dolby Vision) sized to the picture's aspect ratio. We own
- * the view rather than using media3-ui-compose's ContentFrame so the frame-rate "Always" mode can
- * call `Surface.setFrameRate` on it. Black until the first frame is drawn.
+ * The video: a SurfaceView (needed for HDR/Dolby Vision) sized to the picture's aspect ratio, black
+ * until the first frame is drawn. The frame-rate "Always" mode sets the window's preferred display
+ * mode while the player is open.
  */
 @Composable
 private fun VideoSurface(controller: PlaybackController, aspect: Float, firstFrame: Boolean) {
+    val window = (LocalContext.current as? android.app.Activity)?.window
+    val mode by controller.preferredDisplayMode.collectAsStateWithLifecycle()
+    LaunchedEffect(window, mode) { window?.setPreferredDisplayMode(mode) }
+    // Leaving the player gives the display back to the system (the home screen's own mode).
+    DisposableEffect(window) { onDispose { window?.setPreferredDisplayMode(0) } }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         AndroidView(
             factory = { ctx ->
-                SurfaceView(ctx).also { view ->
-                    view.holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) = controller.onSurface(holder.surface)
-                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
-                        override fun surfaceDestroyed(holder: SurfaceHolder) = controller.onSurface(null)
-                    })
-                    controller.attachSurface(view.holder)
-                }
+                SurfaceView(ctx).also { view -> controller.attachSurface(view.holder) }
             },
             onRelease = { view -> controller.detachSurface(view.holder) },
             modifier = Modifier.aspectRatio(aspect.coerceIn(0.5f, 4f)),
         )
         if (!firstFrame) Box(Modifier.fillMaxSize().background(Color.Black))
     }
+}
+
+private fun android.view.Window.setPreferredDisplayMode(id: Int) {
+    if (attributes.preferredDisplayModeId == id) return
+    attributes = attributes.also { it.preferredDisplayModeId = id }
 }

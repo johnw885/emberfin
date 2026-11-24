@@ -31,6 +31,9 @@ import com.johnw.emberfin.ui.Wordmark
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import org.koin.compose.koinInject
+import androidx.navigation.NavDestination.Companion.hasRoute
+import com.johnw.emberfin.remote.RemoteControl
+import org.jellyfin.sdk.model.api.PlayCommand
 
 /** What screens can ask the app to do. Kept small so screens don't know about routes. */
 class AppNavigator(private val nav: NavHostController, private val preview: PreviewPlayer? = null) {
@@ -74,13 +77,41 @@ fun EmberfinNavHost(nav: NavHostController, debugPlay: Flow<PlayerRoute>) {
         }
     }
 
+    // "Play on <this Streamer>" from another Jellyfin client.
+    val remote: RemoteControl = koinInject()
+    LaunchedEffect(Unit) {
+        remote.play.collect { request ->
+            if (sessions.current.value == null) return@collect // Profile picker or sign-in on screen.
+            val ids = request.itemIds.orEmpty().map { it.toString() }
+            if (ids.isEmpty()) return@collect
+            val onPlayer = nav.currentBackStackEntry?.destination?.hasRoute<PlayerRoute>() == true
+            val queueing = request.playCommand == PlayCommand.PLAY_NEXT || request.playCommand == PlayCommand.PLAY_LAST
+            if (queueing && onPlayer) {
+                remote.forward(request)
+                return@collect
+            }
+            val start = (request.startIndex ?: 0).coerceIn(0, ids.lastIndex)
+            val route = PlayerRoute(
+                itemId = ids[start],
+                // The sender says where to start (0 = from the beginning); no position = resume.
+                startMs = request.startPositionTicks?.let { it / 10_000 } ?: -1,
+                queue = if (ids.size > 1) ids else emptyList(),
+                audio = request.audioStreamIndex ?: PlayerRoute.NO_INDEX,
+                subtitle = request.subtitleStreamIndex ?: PlayerRoute.NO_INDEX,
+            )
+            preview.release()
+            nav.navigate(route) { if (onPlayer) popUpTo<PlayerRoute> { inclusive = true } }
+        }
+    }
+
     // Debug builds: `am start --es play_item_id …` plays an item once a profile is active.
     LaunchedEffect(Unit) {
         debugPlay.collect { route ->
             sessions.current.first { it != null }
             kotlinx.coroutines.delay(400) // let the start screen hand over to Main first
             preview.release()
-            nav.navigate(route)
+            val onPlayer = nav.currentBackStackEntry?.destination?.hasRoute<PlayerRoute>() == true
+            nav.navigate(route) { if (onPlayer) popUpTo<PlayerRoute> { inclusive = true } }
         }
     }
 
@@ -119,7 +150,19 @@ fun EmberfinNavHost(nav: NavHostController, debugPlay: Flow<PlayerRoute>) {
             val r = entry.toRoute<PlayerRoute>()
             // The player may report "exit" more than once (Back, then ON_STOP or end of media):
             // only pop while this entry is still on top, or Main gets popped too.
-            PlayerScreen(PlayerArgs(r.itemId, r.startMs), onExit = { if (nav.currentBackStackEntry?.id == entry.id) nav.popBackStack() })
+            val onTop = { nav.currentBackStackEntry?.id == entry.id }
+            PlayerScreen(
+                PlayerArgs(
+                    itemId = r.itemId,
+                    startPositionMs = r.startMs,
+                    queue = r.queue,
+                    audioIndex = r.audio.takeIf { it != PlayerRoute.NO_INDEX },
+                    subtitleIndex = r.subtitle.takeIf { it != PlayerRoute.NO_INDEX },
+                ),
+                onExit = { if (onTop()) nav.popBackStack() },
+                // Post-play "More like this": the title's page replaces the player.
+                onOpen = { id -> if (onTop()) nav.navigate(DetailsRoute(id)) { popUpTo<PlayerRoute> { inclusive = true } } },
+            )
         }
         composable<SearchRoute> { SearchScreen(app) }
         composable<SettingsRoute> { SettingsScreen(app) }

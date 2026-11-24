@@ -18,6 +18,8 @@ sealed interface SegmentUi {
     data class SkipButton(val segment: Segment) : SegmentUi
     /** Next-episode card. [remainingMs] is null when autoplay is off (the card waits for the user). */
     data class NextUp(val remainingMs: Long?, val totalMs: Long) : SegmentUi
+    /** The credits of a title with nothing after it (a movie): the "More like this" panel. */
+    data object Credits : SegmentUi
 }
 
 /** Something the player must do. */
@@ -49,6 +51,7 @@ class SegmentController(
     private var nextUpCancelled = false
     private var nextFired = false
     private var lastPositionMs = 0L
+    private var creditsDismissed = false
 
     /** Where the next-episode countdown starts, or null when there's no next episode. */
     val nextUpStartMs: Long? = run {
@@ -56,6 +59,12 @@ class SegmentController(
         val outro = this.segments.lastOrNull { action(it) == SegmentAction.NEXT_UP }
         outro?.startMs ?: (durationMs - settings.nextUpBeforeEndMs).takeIf { durationMs > 2 * settings.nextUpBeforeEndMs }
     }
+
+    /**
+     * Where the "More like this" panel opens over the credits when there's no next episode:
+     * the Outro segment's start. Without one the panel only appears when the file ends.
+     */
+    val creditsStartMs: Long? = if (hasNext) null else this.segments.lastOrNull { action(it) == SegmentAction.NEXT_UP }?.startMs
 
     /** Call on every position tick. Returns a command when playback must change. */
     fun update(positionMs: Long, userSeeking: Boolean = false): SegmentCommand? {
@@ -84,6 +93,16 @@ class SegmentController(
             // Rewound before the credits: the countdown may start again later.
             nextUpAnchorMs = null
             nextUpCancelled = false
+        }
+
+        val credits = creditsStartMs
+        if (credits != null) {
+            if (positionMs < credits) {
+                creditsDismissed = false
+            } else if (!creditsDismissed) {
+                ui = SegmentUi.Credits
+                return null
+            }
         }
 
         val current = segments.firstOrNull { positionMs in it && positionMs < it.endMs - END_MARGIN_MS }
@@ -119,6 +138,11 @@ class SegmentController(
         }
         is SegmentUi.NextUp -> {
             nextUpCancelled = true
+            ui = SegmentUi.None
+            true
+        }
+        SegmentUi.Credits -> {
+            creditsDismissed = true
             ui = SegmentUi.None
             true
         }

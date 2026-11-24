@@ -63,6 +63,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import com.johnw.emberfin.data.SessionManager
@@ -101,6 +102,7 @@ class MainViewModel(private val library: LibraryRepository, val session: ActiveS
  * focus while you move between tabs. Back from content goes to the nav; Back on another tab
  * goes Home; Back on Home's nav leaves the app.
  */
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 @Composable
 fun MainScreen(nav: AppNavigator, vm: MainViewModel = koinViewModel()) {
     val tabs by vm.tabs.collectAsStateWithLifecycle()
@@ -116,6 +118,16 @@ fun MainScreen(nav: AppNavigator, vm: MainViewModel = koinViewModel()) {
     val unreachable by health.unreachable.collectAsStateWithLifecycle()
     // Bumped to make the visible tab reload (Retry, or the server coming back).
     var reload by remember { mutableIntStateOf(0) }
+    // Watched state, resume points or My List changed on the server (a phone, Jellyfin web, another
+    // TV): reload the visible tab, a few seconds later so a burst of changes reloads once. Under the
+    // player or Details the tab is stopped, and RefreshOnReturn reloads it on the way back.
+    val remote: com.johnw.emberfin.remote.RemoteControl = koinInject()
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(remote) {
+        remote.userDataChanged.debounce(USER_DATA_DEBOUNCE_MS).collect {
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) reload++
+        }
+    }
     LaunchedEffect(unreachable) {
         if (unreachable) {
             // Keep trying quietly; any answer from the server clears the banner.
@@ -256,6 +268,7 @@ private fun OfflineBanner(server: String, onRetry: () -> Unit, modifier: Modifie
 }
 
 private const val RETRY_MS = 15_000L
+private const val USER_DATA_DEBOUNCE_MS = 3_000L
 
 /** Refresh a tab when coming back from Details or the player (resume points, My List). */
 @Composable

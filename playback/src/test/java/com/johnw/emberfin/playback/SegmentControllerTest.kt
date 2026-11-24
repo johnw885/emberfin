@@ -137,7 +137,8 @@ class SegmentControllerTest {
         val c = controller(hasNext = false)
         assertNull(c.nextUpStartMs)
         assertNull(c.update(2_540_000))
-        assertEquals(SegmentUi.None, c.ui)
+        // The outro of a title with nothing after it is the credits panel, never a countdown.
+        assertEquals(SegmentUi.Credits, c.ui)
         assertNull(c.onEnded())
         assertNull(c.onPlayNextPressed())
     }
@@ -179,5 +180,26 @@ class SegmentControllerTest {
             type = MediaSegmentType.OUTRO, startTicks = 25_072_130_000, endTicks = 25_686_550_000,
         )
         assertEquals(Segment(MediaSegmentType.OUTRO, 2_507_213, 2_568_655), Segment.from(dto))
+    }
+
+    @Test fun `a movie's outro opens the credits panel, and Back hides it`() {
+        val c = controller(hasNext = false)
+        assertEquals(2_500_000L, c.creditsStartMs)
+        c.update(2_400_000)
+        assertEquals(SegmentUi.None, c.ui)
+        c.update(2_501_000)
+        assertEquals(SegmentUi.Credits, c.ui)
+        assertTrue(c.onBack())
+        c.update(2_502_000)
+        assertEquals(SegmentUi.None, c.ui)
+        // Rewinding before the credits lets the panel come back.
+        c.update(2_000_000)
+        c.update(2_501_000)
+        assertEquals(SegmentUi.Credits, c.ui)
+    }
+
+    @Test fun `no credits panel when an episode comes next or there is no outro`() {
+        assertNull(controller(hasNext = true).creditsStartMs)
+        assertNull(controller(segments = listOf(intro), hasNext = false).creditsStartMs)
     }
 }

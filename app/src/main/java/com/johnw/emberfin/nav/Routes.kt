@@ -11,8 +11,22 @@ import kotlinx.serialization.Serializable
 @Serializable data class DetailsRoute(val itemId: String)
 @Serializable data class PersonRoute(val personId: String)
 
-/** [startMs] -1 = resume from the server's position, 0 = from the start. */
-@Serializable data class PlayerRoute(val itemId: String, val startMs: Long = -1)
+/**
+ * [startMs] -1 = resume from the server's position, 0 = from the start. [queue] (optional) is the
+ * whole play list with [itemId] in it, e.g. from a phone's "play on". [audio]/[subtitle] are stream
+ * indexes asked for by a remote client ([NO_INDEX] = choose as usual, -1 subtitle = off).
+ */
+@Serializable data class PlayerRoute(
+    val itemId: String,
+    val startMs: Long = -1,
+    val queue: List<String> = emptyList(),
+    val audio: Int = NO_INDEX,
+    val subtitle: Int = NO_INDEX,
+) {
+    companion object {
+        const val NO_INDEX = -100
+    }
+}
 
 @Serializable data object SearchRoute
 @Serializable data object SettingsRoute

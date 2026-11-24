@@ -1,10 +1,12 @@
 package com.johnw.emberfin.playback
 
 import android.content.Context
+import android.hardware.display.DisplayManager
 import android.net.Uri
-import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.view.Display
 import android.util.Log
-import android.view.Surface
 import android.view.SurfaceHolder
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -109,11 +111,24 @@ class PlaybackController(
     private var released = false
 
     private val frameRateMode = settings.frameRateMode
-    private var surface: Surface? = null
     private var videoFrameRate: Float? = null
 
+    private val displays = context.getSystemService(DisplayManager::class.java)
+    /** Set while playback waits for the TV to finish a refresh-rate switch (see [holdForDisplaySwitch]). */
+    private var displayHold: Job? = null
+    private var displayListener: DisplayManager.DisplayListener? = null
+
+    private val _displayMode = MutableStateFlow(0)
+    /**
+     * ALWAYS mode: the display mode the player's window should ask for (0 = no preference). The
+     * screen sets it as the window's `preferredDisplayModeId`, which switches straight away.
+     * (`Surface.setFrameRate` only switched once frames were flowing, so the TV's re-sync blank
+     * swallowed the first seconds of playback.)
+     */
+    val preferredDisplayMode: StateFlow<Int> = _displayMode.asStateFlow()
+
     init {
-        // ALWAYS is done by us on the surface (see applyFrameRate), so ExoPlayer's own switching is off.
+        // ALWAYS is done by us through the window (see applyFrameRate), so ExoPlayer's own switching is off.
         player.videoChangeFrameRateStrategy = when (frameRateMode) {
             FrameRateMode.SEAMLESS -> C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS
             FrameRateMode.OFF, FrameRateMode.ALWAYS -> C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
@@ -163,40 +178,77 @@ class PlaybackController(
         })
     }
 
-    /** The player screen's SurfaceView holder. Video goes there; ALWAYS mode sets its frame rate. */
+    /** The player screen's SurfaceView holder. */
     fun attachSurface(holder: SurfaceHolder) {
         player.setVideoSurfaceHolder(holder)
     }
 
     fun detachSurface(holder: SurfaceHolder) {
-        surface = null
         player.clearVideoSurfaceHolder(holder)
     }
 
-    /** Called by the SurfaceView's callback when its surface is created (or destroyed: null). */
-    fun onSurface(value: Surface?) {
-        surface = value
-        applyFrameRate()
-    }
-
     private fun applyFrameRate() {
-        if (frameRateMode != FrameRateMode.ALWAYS || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-        val s = surface?.takeIf { it.isValid } ?: return
+        if (frameRateMode != FrameRateMode.ALWAYS) return
         val rate = videoFrameRate ?: return
-        runCatching { s.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE, Surface.CHANGE_FRAME_RATE_ALWAYS) }
-            .onSuccess { Log.i(TAG, "Asked the display for $rate Hz (always)") }
-            .onFailure { Log.w(TAG, "setFrameRate failed", it) }
+        val display = displays?.getDisplay(Display.DEFAULT_DISPLAY) ?: return
+        val current = display.mode.info()
+        val target = FrameRatePolicy.pickMode(display.supportedModes.map { it.info() }, current, rate) ?: return
+        if (target != current.id) holdForDisplaySwitch(target)
+        _displayMode.value = target
+        Log.i(TAG, "Display mode $target for $rate fps (always; display at ${current.refreshRate} Hz, mode ${current.id})")
     }
 
-    private fun clearFrameRate() {
-        if (frameRateMode != FrameRateMode.ALWAYS || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-        surface?.takeIf { it.isValid }?.let { s ->
-            runCatching { s.setFrameRate(0f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT, Surface.CHANGE_FRAME_RATE_ALWAYS) }
+    private fun Display.Mode.info() = DisplayModeInfo(modeId, physicalWidth, physicalHeight, refreshRate)
+
+    /**
+     * A refresh-rate switch blanks the TV for a second or two (HDMI re-sync), and whatever plays
+     * meanwhile is lost: the first lines of dialogue, and the receiver may miss the start of the
+     * Dolby bitstream. So playback waits for the switch, then a moment for the TV, then starts.
+     * Gives up waiting after [FrameRatePolicy.SWITCH_TIMEOUT_MS] (the TV may refuse the mode).
+     */
+    private fun holdForDisplaySwitch(targetMode: Int) {
+        if (displayHold != null || !player.playWhenReady) return
+        val dm = displays ?: return
+        player.playWhenReady = false
+        val started = System.currentTimeMillis()
+        var changedAt: Long? = null
+        val l = object : DisplayManager.DisplayListener {
+            override fun onDisplayChanged(displayId: Int) {
+                if (displayId != Display.DEFAULT_DISPLAY || changedAt != null) return
+                if (dm.getDisplay(displayId)?.mode?.modeId == targetMode) changedAt = System.currentTimeMillis()
+            }
+            override fun onDisplayAdded(displayId: Int) = Unit
+            override fun onDisplayRemoved(displayId: Int) = Unit
+        }
+        displayListener = l
+        dm.registerDisplayListener(l, Handler(Looper.getMainLooper()))
+        Log.i(TAG, "Holding playback for the display's refresh-rate switch")
+        displayHold = main.launch {
+            while (isActive) {
+                val now = System.currentTimeMillis()
+                val changed = changedAt
+                if (changed != null && now - changed >= FrameRatePolicy.SETTLE_MS) break
+                if (changed == null && now - started >= FrameRatePolicy.SWITCH_TIMEOUT_MS) break
+                delay(100)
+            }
+            val switched = changedAt?.let { "switched after ${it - started} ms" } ?: "didn't switch"
+            Log.i(TAG, "Display $switched; playing after ${System.currentTimeMillis() - started} ms")
+            endDisplayHold(resume = true)
         }
     }
 
+    private fun endDisplayHold(resume: Boolean) {
+        displayListener?.let { displays?.unregisterDisplayListener(it) }
+        displayListener = null
+        val hold = displayHold ?: return
+        displayHold = null
+        hold.cancel()
+        if (resume && !released) player.playWhenReady = true
+    }
+
     /** Plays [plan] from [startMs], ending the previous stream's reporting first. */
-    fun load(plan: StreamPlan, startMs: Long, title: String, subtitle: String? = null) {
+    fun load(plan: StreamPlan, startMs: Long, title: String, subtitle: String? = null, playWhenReady: Boolean = true) {
+        endDisplayHold(resume = false)
         finishReporting(failed = false)
         this.plan = plan
         dvBaseLayerOnly = !plan.isTranscoding &&
@@ -229,7 +281,7 @@ class PlaybackController(
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             .build()
         player.setMediaItem(item, startMs)
-        player.playWhenReady = true
+        player.playWhenReady = playWhenReady
         player.prepare()
     }
 
@@ -284,7 +336,15 @@ class PlaybackController(
 
     fun togglePlayPause() {
         if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+        // A press during the refresh-rate wait means "play now".
+        if (displayHold != null) return endDisplayHold(resume = true)
         player.playWhenReady = !player.playWhenReady
+    }
+
+    fun setPlaying(playing: Boolean) {
+        if (displayHold != null) endDisplayHold(resume = playing)
+        if (playing && player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+        player.playWhenReady = playing
     }
 
     fun seekTo(positionMs: Long) {
@@ -331,7 +391,8 @@ class PlaybackController(
         if (released) return
         finishReporting(failed = player.playerError != null)
         released = true
-        clearFrameRate()
+        endDisplayHold(resume = false)
+        _displayMode.value = 0
         mediaSession.release()
         player.release()
     }
@@ -361,4 +422,33 @@ object FrameRatePolicy {
      */
     fun target(formatRate: Float, streamRate: Float?): Float? =
         formatRate.takeIf { it in 1f..240f } ?: streamRate?.takeIf { it in 1f..240f }
+
+    /**
+     * The display mode for a [videoRate] fps video: one at the current resolution whose refresh
+     * rate is the video's or a whole multiple of it. Keeps the [current] mode when it already fits
+     * (30 fps on 60 Hz: no blank); otherwise the highest fitting rate up to the current one
+     * (59.94 Hz for 29.97 fps, 23.976 Hz for film). Null = no mode fits, leave the display alone.
+     */
+    fun pickMode(modes: List<DisplayModeInfo>, current: DisplayModeInfo, videoRate: Float): Int? {
+        if (videoRate <= 0f) return null
+        val fitting = modes.filter { it.width == current.width && it.height == current.height && fits(it.refreshRate, videoRate) }
+        if (fitting.isEmpty()) return null
+        if (fitting.any { it.id == current.id }) return current.id
+        return (fitting.filter { it.refreshRate <= current.refreshRate + 0.01f }.maxByOrNull { it.refreshRate }
+            ?: fitting.minBy { it.refreshRate }).id
+    }
+
+    private fun fits(displayRate: Float, videoRate: Float): Boolean {
+        val ratio = displayRate / videoRate
+        val whole = kotlin.math.round(ratio)
+        return whole >= 1f && kotlin.math.abs(ratio - whole) / whole <= 0.0005f
+    }
+
+    /** After the display reports the new mode, the TV still needs this long to show a picture. */
+    const val SETTLE_MS = 1_500L
+    /** No mode change by then: the TV refused the mode, so play anyway. */
+    const val SWITCH_TIMEOUT_MS = 4_000L
 }
+
+/** A display mode, as plain data so [FrameRatePolicy] can be unit-tested. */
+data class DisplayModeInfo(val id: Int, val width: Int, val height: Int, val refreshRate: Float)

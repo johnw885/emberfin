@@ -19,7 +19,9 @@ import com.johnw.emberfin.library.GridKind
 import com.johnw.emberfin.library.GridViewModel
 import com.johnw.emberfin.library.LibraryTabViewModel
 import com.johnw.emberfin.profiles.AddProfileViewModel
+import com.johnw.emberfin.player.SeriesTracks
 import com.johnw.emberfin.profiles.ProfilesViewModel
+import com.johnw.emberfin.remote.RemoteControl
 import com.johnw.emberfin.search.SearchViewModel
 import com.johnw.emberfin.settings.SettingsStore
 import com.johnw.emberfin.settings.SettingsViewModel
@@ -46,6 +48,8 @@ fun appModule(app: EmberfinApp) = module {
     single { EmberfinDatabase.create(get()) }
     single<RowCache> { RoomRowCache(get<EmberfinDatabase>().screenCache()) }
     single { PreviewPlayer(get()) }
+    single { SeriesTracks(get<EmberfinDatabase>().seriesTracks()) }
+    single { RemoteControl(get(), get()) }
 
     viewModel { ProfilesViewModel(get(), get()) }
     viewModel { AddProfileViewModel(get(), get(), get()) }

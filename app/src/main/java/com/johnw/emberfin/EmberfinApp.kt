@@ -26,6 +26,8 @@ class EmberfinApp : Application(), SingletonImageLoader.Factory {
     val sessions: SessionManager by inject()
     val library: LibraryRepository by inject()
     val settings: SettingsStore by inject()
+    val seriesTracks: com.johnw.emberfin.player.SeriesTracks by inject()
+    val remote: com.johnw.emberfin.remote.RemoteControl by inject()
 
     override fun onCreate() {
         super.onCreate()
@@ -33,6 +35,7 @@ class EmberfinApp : Application(), SingletonImageLoader.Factory {
             androidContext(this@EmberfinApp)
             modules(appModule(this@EmberfinApp))
         }
+        remote.start()
     }
 
     /** Art-heavy TV UI: a bigger memory cache, RGB_565 for photos and a short crossfade by default. */

@@ -39,17 +39,49 @@ interface ScreenCacheDao {
 }
 
 /**
- * Emberfin's local database. Version 1 holds the row cache; Session 5b adds per-series
- * audio/subtitle choices. It's a cache, so a schema change may simply rebuild it.
+ * The audio/subtitle choice a profile last made in a series ("<profile key>/<series id>").
+ * Stores what the tracks are (language, title, forced), not their indexes, which differ per episode.
+ * A null column means "no preference" for that part.
  */
-@Database(entities = [ScreenCacheEntity::class], version = 1, exportSchema = false)
+@Entity(tableName = "series_tracks")
+data class SeriesTracksEntity(
+    @PrimaryKey val key: String,
+    val audioLanguage: String? = null,
+    val audioTitle: String? = null,
+    /** True once the user picked audio in this series (the language may still be unknown). */
+    val audioSet: Boolean = false,
+    /** null = no subtitle choice yet, true = subtitles off, false = [subtitleLanguage] etc. */
+    val subtitleOff: Boolean? = null,
+    val subtitleLanguage: String? = null,
+    val subtitleForced: Boolean = false,
+    val subtitleTitle: String? = null,
+    val subtitleCodec: String? = null,
+    val savedAt: Long = 0,
+)
+
+@Dao
+interface SeriesTracksDao {
+    @Query("SELECT * FROM series_tracks WHERE `key` = :key")
+    suspend fun get(key: String): SeriesTracksEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(entity: SeriesTracksEntity)
+}
+
+/**
+ * Emberfin's local database: version 1 held the row cache, version 2 (Session 5b) adds
+ * per-series audio/subtitle choices. Version 1 had only the cache, so its upgrade can simply
+ * rebuild; later versions need real migrations, since the track choices are the user's.
+ */
+@Database(entities = [ScreenCacheEntity::class, SeriesTracksEntity::class], version = 2, exportSchema = false)
 abstract class EmberfinDatabase : RoomDatabase() {
     abstract fun screenCache(): ScreenCacheDao
+    abstract fun seriesTracks(): SeriesTracksDao
 
     companion object {
         fun create(context: Context): EmberfinDatabase =
             Room.databaseBuilder(context.applicationContext, EmberfinDatabase::class.java, "emberfin.db")
-                .fallbackToDestructiveMigration(dropAllTables = true)
+                .fallbackToDestructiveMigrationFrom(dropAllTables = true, 1)
                 .build()
     }
 }

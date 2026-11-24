@@ -26,10 +26,18 @@ build it yourself and sideload it.
     picked or listed; the player chooses an E-AC-3, AC-3 or AAC track instead;
   - trickplay thumbnails while scrubbing, Skip Intro/Recap buttons and a next-episode countdown from
     Jellyfin's media segments;
+  - an Episodes panel inside the player, "More like this" over a movie's credits and after the end,
+    and "Are you still watching?" after three episodes or two hours without a key press;
+  - each series remembers the audio and subtitle choice you made in any of its episodes;
   - subtitles (SRT, ASS/SSA, PGS, VobSub, WebVTT) in an adjustable caption style;
-  - frame-rate matching (off, seamless only, or always);
+  - frame-rate matching (off, seamless only, or always; "always" waits for the TV to finish
+    switching before playback starts);
   - resume points and playback progress reported to the server, and remote play/pause through a
     media session (HDMI-CEC works too).
+- **Play on the TV from your phone**: while Emberfin is open, other Jellyfin apps (the phone app's cast
+  button, Jellyfin web's "Play on") can start playback on the TV and control play/pause, seeking,
+  next/previous and audio/subtitle tracks, and send messages to the screen. Rows refresh by themselves
+  when watched state changes elsewhere.
 - **Settings**: streaming quality cap, Atmos preference, frame-rate matching, what to do at intros,
   recaps, previews, commercials and credits, autoplay, subtitle size and background, profiles and
   sign-out, and open-source licences.

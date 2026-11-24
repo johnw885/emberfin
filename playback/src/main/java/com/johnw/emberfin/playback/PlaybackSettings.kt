@@ -10,7 +10,7 @@ enum class SegmentAction { SKIP_BUTTON, AUTO_SKIP, NEXT_UP, IGNORE }
  * - OFF: never switch.
  * - SEAMLESS: ExoPlayer's strategy, only when the display can switch without a blank (default).
  * - ALWAYS: ask for the video's rate even if the TV blanks for a moment (needed for 29.97/59.94 fps
- *   on a 60 Hz output); done with `Surface.setFrameRate(…, CHANGE_FRAME_RATE_ALWAYS)`.
+ *   on a 60 Hz output); done by setting the player window's preferred display mode.
  */
 enum class FrameRateMode { OFF, SEAMLESS, ALWAYS }
 
