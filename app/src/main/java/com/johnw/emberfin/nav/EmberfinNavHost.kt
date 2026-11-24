@@ -14,6 +14,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
+import com.johnw.emberfin.browse.PreviewPlayer
 import com.johnw.emberfin.data.SessionManager
 import com.johnw.emberfin.details.DetailsScreen
 import com.johnw.emberfin.details.PersonScreen
@@ -32,10 +33,14 @@ import kotlinx.coroutines.flow.first
 import org.koin.compose.koinInject
 
 /** What screens can ask the app to do. Kept small so screens don't know about routes. */
-class AppNavigator(private val nav: NavHostController) {
+class AppNavigator(private val nav: NavHostController, private val preview: PreviewPlayer? = null) {
     fun details(itemId: String) = nav.navigate(DetailsRoute(itemId))
     fun person(personId: String) = nav.navigate(PersonRoute(personId))
-    fun play(itemId: String, startMs: Long = PlayerArgs.RESUME) = nav.navigate(PlayerRoute(itemId, startMs))
+    fun play(itemId: String, startMs: Long = PlayerArgs.RESUME) {
+        // One decoder at a time: the billboard's trailer goes before the player opens its own.
+        preview?.release()
+        nav.navigate(PlayerRoute(itemId, startMs))
+    }
     fun search() = nav.navigate(SearchRoute) { launchSingleTop = true }
     fun settings() = nav.navigate(SettingsRoute) { launchSingleTop = true }
     fun licenses() = nav.navigate(LicensesRoute) { launchSingleTop = true }
@@ -57,7 +62,8 @@ class AppNavigator(private val nav: NavHostController) {
 @Composable
 fun EmberfinNavHost(nav: NavHostController, debugPlay: Flow<PlayerRoute>) {
     val sessions: SessionManager = koinInject()
-    val app = androidx.compose.runtime.remember(nav) { AppNavigator(nav) }
+    val preview: PreviewPlayer = koinInject()
+    val app = androidx.compose.runtime.remember(nav) { AppNavigator(nav, preview) }
 
     // The server stopped accepting this profile's sign-in (token revoked or expired): sign in again.
     LaunchedEffect(Unit) {
@@ -73,6 +79,7 @@ fun EmberfinNavHost(nav: NavHostController, debugPlay: Flow<PlayerRoute>) {
         debugPlay.collect { route ->
             sessions.current.first { it != null }
             kotlinx.coroutines.delay(400) // let the start screen hand over to Main first
+            preview.release()
             nav.navigate(route)
         }
     }

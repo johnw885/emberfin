@@ -53,6 +53,27 @@ abstract class BrowseViewModel(protected val library: LibraryRepository, val ses
 
     protected open fun onMyListChanged() {}
 
+    /** Billboard trailers looked up so far (null = the title has none). */
+    private val trailerUrls = mutableMapOf<String, String?>()
+
+    /**
+     * The stream URL of [item]'s first local trailer. The list endpoints don't return
+     * `LocalTrailerCount`, so this asks `/Items/{id}/LocalTrailers` once per title.
+     */
+    suspend fun trailerUrl(item: BaseItemDto): String? {
+        val key = item.id.toString()
+        if (trailerUrls.containsKey(key)) return trailerUrls[key]
+        val url = try {
+            library.localTrailers(session, item.id).firstOrNull()?.let { library.trailerStreamUrl(session, it.id) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return null // Not cached: try again next time.
+        }
+        trailerUrls[key] = url
+        return url
+    }
+
     protected fun launchSafely(block: suspend () -> Unit): Job = viewModelScope.launch {
         try {
             block()

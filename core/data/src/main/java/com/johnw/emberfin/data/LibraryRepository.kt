@@ -5,9 +5,15 @@ import kotlinx.coroutines.withContext
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.genreApi
 import org.jellyfin.sdk.api.client.extensions.libraryApi
+import org.jellyfin.sdk.api.client.extensions.movieApi
+import org.jellyfin.sdk.api.client.extensions.playlistApi
 import org.jellyfin.sdk.api.client.extensions.showApi
 import org.jellyfin.sdk.api.client.extensions.userDataApi
 import org.jellyfin.sdk.api.client.extensions.userViewApi
+import org.jellyfin.sdk.api.client.extensions.videoApi
+import org.jellyfin.sdk.model.api.RecommendationDto
+import org.jellyfin.sdk.model.api.UpdateUserItemDataDto
+import org.jellyfin.sdk.model.api.UserItemDataDto
 import org.jellyfin.sdk.model.UUID
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
@@ -166,6 +172,75 @@ class LibraryRepository {
     /** Local trailers (Session S downloads one per title). */
     suspend fun localTrailers(s: ActiveSession, itemId: UUID): List<BaseItemDto> = io {
         s.api.libraryApi.getLocalTrailers(itemId = itemId, userId = s.userId).content
+    }
+
+    /** A direct-play URL for a local trailer (H.264/AAC mp4s from Session S play as they are). */
+    fun trailerStreamUrl(s: ActiveSession, trailerId: UUID): String =
+        s.api.videoApi.getVideoStreamUrl(itemId = trailerId, static = true)
+
+    /**
+     * The server's movie recommendations ("Because you watched X", "Starring X"…), one category
+     * per recently played or liked title.
+     */
+    suspend fun movieRecommendations(s: ActiveSession, categories: Int = 3, perCategory: Int = 16): List<RecommendationDto> = io {
+        s.api.movieApi.getMovieRecommendations(
+            userId = s.userId, fields = listFields, categoryLimit = categories, itemLimit = perCategory,
+        ).content
+    }
+
+    /** The series played most recently (for "Because you watched <series>"). */
+    suspend fun lastPlayedSeries(s: ActiveSession): Pair<UUID, String>? {
+        val episode = items(
+            s, kinds = listOf(BaseItemKind.EPISODE), filters = listOf(ItemFilter.IS_PLAYED),
+            sortBy = listOf(ItemSortBy.DATE_PLAYED), order = SortOrder.DESCENDING, limit = 1,
+        ).items.firstOrNull() ?: return null
+        val seriesId = episode.seriesId ?: return null
+        return seriesId to episode.seriesName.orEmpty()
+    }
+
+    /** Collections (box sets) the user can see. */
+    suspend fun collections(s: ActiveSession, limit: Int = 24): List<BaseItemDto> = items(
+        s, kinds = listOf(BaseItemKind.BOX_SET), sortBy = listOf(ItemSortBy.SORT_NAME), limit = limit,
+    ).items
+
+    /** The user's playlists (video ones only; music isn't supported). */
+    suspend fun playlists(s: ActiveSession, limit: Int = 24): List<BaseItemDto> = items(
+        s, kinds = listOf(BaseItemKind.PLAYLIST), sortBy = listOf(ItemSortBy.DATE_CREATED), order = SortOrder.DESCENDING, limit = limit,
+    ).items.filter { it.mediaType == null || it.mediaType == MediaType.VIDEO || it.mediaType == MediaType.UNKNOWN }
+
+    /** What's inside a collection (by release date) or a playlist (in playlist order). */
+    suspend fun children(s: ActiveSession, parent: BaseItemDto, limit: Int = 200): List<BaseItemDto> = io {
+        if (parent.type == BaseItemKind.PLAYLIST) {
+            s.api.playlistApi.getPlaylistItems(
+                playlistId = parent.id, userId = s.userId, limit = limit, fields = listFields,
+                enableUserData = true, enableImageTypes = imageTypes, imageTypeLimit = 1,
+            ).content.items
+        } else {
+            s.api.libraryApi.getItems(
+                GetItemsRequest(
+                    userId = s.userId, parentId = parent.id, limit = limit, fields = listFields,
+                    sortBy = listOf(ItemSortBy.PREMIERE_DATE, ItemSortBy.SORT_NAME), enableUserData = true,
+                    enableImageTypes = imageTypes, imageTypeLimit = 1,
+                ),
+            ).content.items
+        }
+    }
+
+    /** Sets the user's thumbs rating (see [Thumbs]); returns the server's new user data. */
+    suspend fun setThumbs(s: ActiveSession, itemId: UUID, thumbs: Thumbs): UserItemDataDto = io {
+        val api = s.api.userDataApi
+        when (val rating = thumbs.rating) {
+            null -> api.deleteUserItemRating(itemId = itemId, userId = s.userId).content
+            else -> api.updateItemUserData(itemId = itemId, userId = s.userId, data = UpdateUserItemDataDto(rating = rating)).content
+        }
+    }
+
+    /** Screensaver art: random titles that have a backdrop (and a logo when possible). */
+    suspend fun screensaver(s: ActiveSession, limit: Int = 40): List<BaseItemDto> {
+        val kinds = listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES)
+        val withLogo = items(s, kinds = kinds, imageTypesFilter = listOf(ImageType.BACKDROP, ImageType.LOGO), sortBy = listOf(ItemSortBy.RANDOM), limit = limit).items
+        if (withLogo.size >= 6) return withLogo
+        return items(s, kinds = kinds, imageTypesFilter = listOf(ImageType.BACKDROP), sortBy = listOf(ItemSortBy.RANDOM), limit = limit).items
     }
 
     /** Adds to or removes from My List; returns the new state. */

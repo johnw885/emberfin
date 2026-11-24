@@ -181,6 +181,7 @@ fun LibraryTabScreen(vm: LibraryTabViewModel, actions: BrowseActions) {
         gridHeader = { GridHeader(vm, state) },
         gridRows = gridRows,
         onNearGridEnd = vm::loadMore,
+        trailerUrl = vm::trailerUrl,
     )
 }
 

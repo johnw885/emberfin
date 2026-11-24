@@ -1,6 +1,10 @@
 package com.johnw.emberfin.browse
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -141,11 +145,15 @@ fun BrowseLayout(
     gridHeader: (@Composable () -> Unit)? = null,
     gridRows: List<RowUi> = emptyList(),
     onNearGridEnd: () -> Unit = {},
+    /** The billboard's local trailer, if any (null: no trailers on this screen). */
+    trailerUrl: (suspend (BaseItemDto) -> String?)? = null,
 ) {
     val playRequester = remember { FocusRequester() }
     val restoreRequester = remember { FocusRequester() }
     // Read only inside HeroBackdrop/HeroArea, so a focus move recomposes the hero, not the rows.
     val heroState = remember { HeroState() }
+    // Rows that have already made their entrance (refreshes don't replay it).
+    val entered = remember { mutableSetOf<String>() }
     var wantBillboardFocus by remember { mutableStateOf(false) }
     var hasHeroFocus by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -184,7 +192,7 @@ fun BrowseLayout(
     }
 
     Box(modifier.fillMaxSize()) {
-        HeroBackdrop(api, heroState, focus, billboard, details)
+        HeroBackdrop(api, heroState, focus, billboard, details, trailerUrl, billboardFocused = hasHeroFocus && !focus.inRows)
         HeroScrims()
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxWidth().height(HeroHeight).padding(start = Dimens.ScreenPadding, top = 64.dp).onFocusChanged { hasHeroFocus = it.hasFocus }) {
@@ -218,6 +226,7 @@ fun BrowseLayout(
                     val rowItem: @Composable (RowUi, Int, Int) -> Unit = { row, gridIndex, listIndex ->
                         ContentRow(
                             api, row,
+                            entrance = if (gridIndex >= 0) null else Entrance(entered, listIndex),
                             restoreRequester = restoreRequester.takeIf {
                                 row.key == focus.rowKey || (focus.rowKey == null && row == (rows.firstOrNull() ?: gridRows.firstOrNull()))
                             },
@@ -264,10 +273,22 @@ private fun HeroBackdrop(
     focus: BrowseFocus,
     billboard: BaseItemDto?,
     details: (BaseItemDto) -> BaseItemDto?,
+    trailerUrl: (suspend (BaseItemDto) -> String?)?,
+    billboardFocused: Boolean,
 ) {
     val item = heroState.shown(focus, billboard)
+    var videoOn by remember { mutableStateOf(false) }
+    // The trailer's video sits under the backdrop, which fades out once frames are showing.
+    if (trailerUrl != null) {
+        BillboardTrailer(billboard.takeIf { !focus.inRows }, active = billboardFocused, trailerUrl = trailerUrl, onVideo = { videoOn = it })
+    }
+    val backdropAlpha by animateFloatAsState(if (videoOn) 0f else 1f, tween(if (videoOn) 800 else 350), label = "backdrop")
     // Ken Burns drift on the billboard only; the focus hero changes too often for it.
-    KenBurnsBackdrop(item?.let { ItemFormat.backdrop(api, details(it) ?: it) }, Modifier.fillMaxSize(), animate = !focus.inRows)
+    KenBurnsBackdrop(
+        item?.let { ItemFormat.backdrop(api, details(it) ?: it) },
+        Modifier.fillMaxSize().graphicsLayer { alpha = backdropAlpha },
+        animate = !focus.inRows && !videoOn,
+    )
 }
 
 @Composable
@@ -287,7 +308,7 @@ private fun HeroArea(
     val showItem = shown?.let { details(it) ?: it }
     AnimatedContent(
         targetState = showItem to focus.inRows,
-        transitionSpec = { fadeIn() togetherWith fadeOut() },
+        transitionSpec = { fadeIn(tween(320, delayMillis = 60)) togetherWith fadeOut(tween(180)) },
         contentKey = { (item, rowsMode) -> (item?.id?.toString() ?: "") + rowsMode },
         label = "hero",
     ) { (item, rowsMode) ->
@@ -307,12 +328,13 @@ private fun HeroArea(
 private fun ContentRow(
     api: ApiClient,
     row: RowUi,
+    entrance: Entrance?,
     restoreRequester: FocusRequester?,
     restoreItemId: String?,
     onFocus: (BaseItemDto) -> Unit,
     onClick: (BaseItemDto) -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().then(if (entrance != null) Modifier.entrance(row.key, entrance) else Modifier)) {
         if (row.title != null) {
             Text(
                 row.title, style = EmberfinType.rowTitle, color = Emberfin.colors.onBackground,
@@ -359,6 +381,30 @@ private fun ContentRow(
                     }
                 }
             }
+    }
+}
+
+/** A row's first appearance on a screen: [index] staggers it after the rows above. */
+class Entrance(val done: MutableSet<String>, val index: Int)
+
+/**
+ * Rows rise and fade in the first time they appear (staggered top to bottom), then never again,
+ * so a refresh or scrolling back doesn't replay it. Only a graphics layer changes: no relayout.
+ */
+@Composable
+private fun Modifier.entrance(key: String, e: Entrance): Modifier {
+    val progress = remember(key) { Animatable(if (key in e.done) 1f else 0f) }
+    LaunchedEffect(key) {
+        if (progress.value < 1f) {
+            delay(minOf(e.index, 5) * 55L)
+            progress.animateTo(1f, tween(380))
+        }
+        e.done += key
+    }
+    val rise = with(LocalDensity.current) { 18.dp.toPx() }
+    return this.graphicsLayer {
+        alpha = progress.value
+        translationY = (1f - progress.value) * rise
     }
 }
 

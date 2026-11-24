@@ -22,6 +22,7 @@ import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Surface
 import com.johnw.emberfin.ui.Art
 import com.johnw.emberfin.ui.Avatar
+import com.johnw.emberfin.ui.Badge
 import com.johnw.emberfin.ui.Dimens
 import com.johnw.emberfin.ui.NavItem
 import com.johnw.emberfin.ui.EmberfinIcons
@@ -43,8 +44,10 @@ fun TopNav(
     onTab: (Tab) -> Unit,
     onSearch: () -> Unit,
     onProfile: () -> Unit,
-    onSettings: () -> Unit,
+    /** Null hides the gear (kids profiles). */
+    onSettings: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    kids: Boolean = false,
     currentTabRequester: FocusRequester? = null,
 ) {
     Row(
@@ -56,6 +59,10 @@ fun TopNav(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Wordmark(size = 22)
+        if (kids) {
+            Spacer(Modifier.width(8.dp))
+            Badge("KIDS", highlight = true)
+        }
         Spacer(Modifier.width(22.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
             tabs.forEach { tab ->
@@ -67,8 +74,10 @@ fun TopNav(
         NavItem(null, selected = false, onClick = onSearch, icon = EmberfinIcons.Search)
         Spacer(Modifier.width(4.dp))
         ProfileButton(profileName, profileArt, onProfile)
-        Spacer(Modifier.width(4.dp))
-        NavItem(null, selected = false, onClick = onSettings, icon = EmberfinIcons.Settings)
+        if (onSettings != null) {
+            Spacer(Modifier.width(4.dp))
+            NavItem(null, selected = false, onClick = onSettings, icon = EmberfinIcons.Settings)
+        }
     }
 }
 

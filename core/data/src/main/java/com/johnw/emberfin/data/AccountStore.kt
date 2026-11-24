@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 
 private val Context.accountsStore: DataStore<Preferences> by preferencesDataStore(name = AccountStore.FILE)
 
@@ -54,10 +56,26 @@ class AccountStore(context: Context) {
         store.edit { it[KEY_LAST_SERVER] = url }
     }
 
+    /** Kids mode and PIN per profile key (see [ProfileLock]). */
+    val locks: Flow<Map<String, ProfileLock>> = store.data.map { decodeLocks(it[KEY_LOCKS]) }
+
+    suspend fun setLock(key: String, lock: ProfileLock) {
+        store.edit { p ->
+            val all = decodeLocks(p[KEY_LOCKS]).toMutableMap()
+            if (lock == ProfileLock()) all.remove(key) else all[key] = lock
+            p[KEY_LOCKS] = RowCodec.json.encodeToString(lockSerializer, all)
+        }
+    }
+
     private fun decode(text: String?): List<Account> =
         text?.let { runCatching { RowCodec.json.decodeFromString(listSerializer, it) }.getOrNull() } ?: emptyList()
 
     private fun encode(list: List<Account>): String = RowCodec.json.encodeToString(listSerializer, list)
+
+    private val lockSerializer = MapSerializer(String.serializer(), ProfileLock.serializer())
+
+    private fun decodeLocks(text: String?): Map<String, ProfileLock> =
+        text?.let { runCatching { RowCodec.json.decodeFromString(lockSerializer, it) }.getOrNull() } ?: emptyMap()
 
     companion object {
         /** Must match the exclusions in app/src/main/res/xml/backup_rules.xml and data_extraction_rules.xml. */
@@ -65,5 +83,6 @@ class AccountStore(context: Context) {
         private val KEY_ACCOUNTS = stringPreferencesKey("accounts")
         private val KEY_ACTIVE = stringPreferencesKey("active")
         private val KEY_LAST_SERVER = stringPreferencesKey("last_server")
+        private val KEY_LOCKS = stringPreferencesKey("profile_locks")
     }
 }

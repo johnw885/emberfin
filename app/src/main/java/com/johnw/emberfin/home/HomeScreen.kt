@@ -20,5 +20,6 @@ fun HomeScreen(vm: HomeViewModel, actions: BrowseActions, modifier: Modifier = M
         inMyList = vm::inMyList,
         modifier = modifier,
         emptyText = state.error ?: if (state.loading) null else "Nothing here yet. Add some media to your server.",
+        trailerUrl = vm::trailerUrl,
     )
 }

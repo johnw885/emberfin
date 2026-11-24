@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.johnw.emberfin.data.ActiveSession
 import com.johnw.emberfin.data.LibraryRepository
+import com.johnw.emberfin.data.Thumbs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -28,6 +29,9 @@ data class DetailsState(
     val similar: List<BaseItemDto> = emptyList(),
     val trailerId: String? = null,
     val inMyList: Boolean = false,
+    val thumbs: Thumbs = Thumbs.None,
+    /** What a collection or playlist holds. */
+    val children: List<BaseItemDto> = emptyList(),
     val error: String? = null,
 )
 
@@ -52,6 +56,10 @@ class DetailsViewModel(
                 val opened = library.item(session, itemId.toUUID())
                 val title = if (opened.type == BaseItemKind.EPISODE) opened.seriesId?.let { library.item(session, it) } ?: opened else opened
                 val isSeries = title.type == BaseItemKind.SERIES
+                if (title.type == BaseItemKind.BOX_SET || title.type == BaseItemKind.PLAYLIST) {
+                    loadContainer(title)
+                    return@launch
+                }
                 coroutineScope {
                     val similar = async { runCatching { library.similar(session, title.id) }.getOrDefault(emptyList()) }
                     val trailers = async { if ((title.localTrailerCount ?: 0) > 0) runCatching { library.localTrailers(session, title.id) }.getOrNull() else null }
@@ -67,7 +75,7 @@ class DetailsViewModel(
                         it.copy(
                             title = title, seasons = seasons, seasonIndex = seasonIndex,
                             similar = similar.await(), trailerId = trailers.await()?.firstOrNull()?.id?.toString(),
-                            inMyList = title.userData?.isFavorite == true, error = null,
+                            inMyList = title.userData?.isFavorite == true, thumbs = Thumbs.of(title.userData), error = null,
                             playTarget = target ?: it.playTarget,
                         )
                     }
@@ -78,6 +86,29 @@ class DetailsViewModel(
             } catch (e: Exception) {
                 _state.update { it.copy(error = com.johnw.emberfin.home.loadError("this title", e)) }
             }
+        }
+    }
+
+    /** A collection or playlist: its items, and Play starts the first one not watched yet. */
+    private suspend fun loadContainer(title: BaseItemDto) {
+        val children = library.children(session, title)
+        val target = children.firstOrNull { it.userData?.played != true } ?: children.firstOrNull()
+        _state.update {
+            it.copy(
+                title = title, children = children, playTarget = target,
+                inMyList = title.userData?.isFavorite == true, thumbs = Thumbs.of(title.userData), error = null,
+            )
+        }
+    }
+
+    fun setThumbs(thumbs: Thumbs) {
+        val title = _state.value.title ?: return
+        val before = _state.value.thumbs
+        _state.update { it.copy(thumbs = thumbs) }
+        viewModelScope.launch {
+            runCatching { library.setThumbs(session, title.id, thumbs) }
+                .onSuccess { data -> _state.update { it.copy(thumbs = Thumbs.of(data)) } }
+                .onFailure { if (it !is CancellationException) _state.update { s -> s.copy(thumbs = before) } }
         }
     }
 

@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -58,15 +61,23 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import com.johnw.emberfin.data.SessionManager
 import kotlinx.coroutines.launch
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
 
 /** Which tabs exist depends on the libraries the profile can see. */
-class MainViewModel(private val library: LibraryRepository, val session: ActiveSession) : ViewModel() {
+class MainViewModel(private val library: LibraryRepository, val session: ActiveSession, sessions: SessionManager) : ViewModel() {
     private val _tabs = MutableStateFlow(listOf(Tab.Home, Tab.Shows, Tab.Movies, Tab.MyList))
-    val tabs: StateFlow<List<Tab>> = _tabs.asStateFlow()
+    /** Kids profiles get a simpler shell: no Home Videos tab and no Settings. */
+    val kids: StateFlow<Boolean> = sessions.lock(session.account).map { it.kids }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val tabs: StateFlow<List<Tab>> = combine(_tabs, kids) { t, k -> if (k) t - Tab.HomeVideos else t }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _tabs.value)
 
     val profileName: String = session.account.userName.ifBlank { "Profile" }
     val profileArt: Art? = ImageUrls.user(session.api, session.userId, session.account.imageTag)?.let { Art(it.url) }
@@ -93,7 +104,10 @@ class MainViewModel(private val library: LibraryRepository, val session: ActiveS
 @Composable
 fun MainScreen(nav: AppNavigator, vm: MainViewModel = koinViewModel()) {
     val tabs by vm.tabs.collectAsStateWithLifecycle()
+    val kids by vm.kids.collectAsStateWithLifecycle()
     var current by rememberSaveable { mutableStateOf(Tab.Home) }
+    // Kids mode turned on while on a tab it hides.
+    LaunchedEffect(tabs) { if (current !in tabs) current = Tab.Home }
     var navFocused by remember { mutableStateOf(false) }
     val navRequester = remember { FocusRequester() }
     val holder = rememberSaveableStateHolder()
@@ -129,14 +143,24 @@ fun MainScreen(nav: AppNavigator, vm: MainViewModel = koinViewModel()) {
         BrowseActions(
             open = { item -> openItem(nav, item) },
             // A series has nothing to play directly: its page picks the next episode.
-            play = { item -> if (item.type == org.jellyfin.sdk.model.api.BaseItemKind.SERIES) nav.details(item.id.toString()) else nav.play(item.id.toString()) },
+            play = { item -> if (item.type in ContainerKinds) nav.details(item.id.toString()) else nav.play(item.id.toString()) },
             toggleList = {},
         )
     }
 
     var contentFocused by remember { mutableStateOf(false) }
+    // A quick fade-in when switching tabs (the first tab just appears).
+    val tabAlpha = remember { Animatable(1f) }
+    var shownTab by remember { mutableStateOf(current) }
+    LaunchedEffect(current) {
+        if (current != shownTab) {
+            shownTab = current
+            tabAlpha.snapTo(0f)
+            tabAlpha.animateTo(1f, tween(260))
+        }
+    }
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().onFocusChanged { contentFocused = it.hasFocus }) {
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = tabAlpha.value }.onFocusChanged { contentFocused = it.hasFocus }) {
         CompositionLocalProvider(LocalAutoFocus provides { !navFocused }) {
         holder.SaveableStateProvider(current.name) {
             when (current) {
@@ -171,7 +195,8 @@ fun MainScreen(nav: AppNavigator, vm: MainViewModel = koinViewModel()) {
             onTab = { current = it },
             onSearch = nav::search,
             onProfile = nav::profiles,
-            onSettings = nav::settings,
+            onSettings = nav::settings.takeUnless { kids },
+            kids = kids,
             currentTabRequester = navRequester,
             modifier = Modifier.onFocusChanged { navFocused = it.hasFocus },
         )
@@ -186,12 +211,21 @@ fun MainScreen(nav: AppNavigator, vm: MainViewModel = koinViewModel()) {
     }
 }
 
+/** Things with nothing to play directly: their page picks what to play. */
+private val ContainerKinds = setOf(
+    org.jellyfin.sdk.model.api.BaseItemKind.SERIES,
+    org.jellyfin.sdk.model.api.BaseItemKind.BOX_SET,
+    org.jellyfin.sdk.model.api.BaseItemKind.PLAYLIST,
+)
+
 /** Movies and series open Details; episodes and home videos play straight away (Netflix does the same). */
 fun openItem(nav: AppNavigator, item: BaseItemDto) {
     when (item.type) {
         org.jellyfin.sdk.model.api.BaseItemKind.MOVIE,
         org.jellyfin.sdk.model.api.BaseItemKind.SERIES,
-        org.jellyfin.sdk.model.api.BaseItemKind.EPISODE -> nav.details(item.id.toString())
+        org.jellyfin.sdk.model.api.BaseItemKind.EPISODE,
+        org.jellyfin.sdk.model.api.BaseItemKind.BOX_SET,
+        org.jellyfin.sdk.model.api.BaseItemKind.PLAYLIST -> nav.details(item.id.toString())
         else -> nav.play(item.id.toString())
     }
 }

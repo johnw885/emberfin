@@ -84,6 +84,7 @@ fun SettingsScreen(nav: AppNavigator, vm: SettingsViewModel = koinViewModel()) {
                     modifier = Modifier.focusRequester(first),
                 )
             }
+            item { SettingRow("Kids profiles and PINs", value = "Manage profiles", hint = "On the profile picker", onClick = nav::profiles) }
             item { SettingRow("Add a profile", value = null, onClick = nav::addProfile) }
             item {
                 SettingRow("Sign out of ${vm.account.userName}", value = null) {

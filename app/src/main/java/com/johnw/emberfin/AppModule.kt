@@ -1,5 +1,6 @@
 package com.johnw.emberfin
 
+import com.johnw.emberfin.browse.PreviewPlayer
 import com.johnw.emberfin.data.AccountStore
 import com.johnw.emberfin.data.ApiHealth
 import com.johnw.emberfin.data.AuthRepository
@@ -44,11 +45,12 @@ fun appModule(app: EmberfinApp) = module {
     single { LibraryRepository() }
     single { EmberfinDatabase.create(get()) }
     single<RowCache> { RoomRowCache(get<EmberfinDatabase>().screenCache()) }
+    single { PreviewPlayer(get()) }
 
     viewModel { ProfilesViewModel(get(), get()) }
     viewModel { AddProfileViewModel(get(), get(), get()) }
-    viewModel { MainViewModel(get(), get<SessionManager>().require()) }
-    viewModel { HomeViewModel(get(), get<SessionManager>().require(), get()) }
+    viewModel { MainViewModel(get(), get<SessionManager>().require(), get()) }
+    viewModel { HomeViewModel(get(), get<SessionManager>().require(), get(), get()) }
     viewModel { (tab: Tab) -> LibraryTabViewModel(get(), get<SessionManager>().require(), get(), tab) }
     viewModel { (kind: GridKind) -> GridViewModel(get(), get<SessionManager>().require(), kind) }
     viewModel { (itemId: String) -> DetailsViewModel(get(), get<SessionManager>().require(), itemId) }

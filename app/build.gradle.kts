@@ -32,10 +32,22 @@ android {
             buildConfigField("String", "DEV_SERVER_URL", "\"$devServerUrl\"")
         }
         release {
-            isMinifyEnabled = false
+            // R8: shrink, optimise and obfuscate. The Baseline Profile in src/main/baseline-prof.txt
+            // is rewritten by R8 to the obfuscated names and shipped in the APK.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             buildConfigField("String", "DEV_SERVER_URL", "\"\"")
             // Sideload-only for now: sign release builds with the debug key.
             signingConfig = signingConfigs.getByName("debug")
+        }
+        // Release without R8, for generating the Baseline Profile: the ART profile dumped on the TV
+        // must use the source class names (see baselineprofile/README.md).
+        create("profiling") {
+            initWith(getByName("release"))
+            isMinifyEnabled = false
+            isShrinkResources = false
+            matchingFallbacks += listOf("release")
         }
     }
 
@@ -50,6 +62,12 @@ android {
     }
 
     testOptions.unitTests.isReturnDefaultValues = true
+}
+
+// The Compose group mapping (deobfuscates Compose stack traces after R8) needs a tool that isn't
+// cached here; Emberfin has no crash reporting to feed it, so it's off.
+composeCompiler {
+    includeComposeMappingFile = false
 }
 
 // No network during builds: licence texts come from the plugin's bundled SPDX set.
@@ -80,6 +98,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.aboutlibraries.core)
+    // Installs the Baseline Profile on sideloaded and Play installs (Play also uses it at install time).
+    implementation(libs.androidx.profileinstaller)
 
     testImplementation(libs.junit)
 }

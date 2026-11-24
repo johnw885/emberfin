@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jellyfin.sdk.api.client.extensions.sessionApi
@@ -67,8 +69,29 @@ class SessionManager(
     suspend fun restore(): List<Account> {
         migrateLegacy()
         val (accounts, _) = store.snapshot()
-        if (accounts.size == 1) activate(accounts.first())
+        // A PIN-locked profile always goes through the picker, which asks for the PIN.
+        if (accounts.size == 1 && locks.first()[accounts.first().key]?.hasPin != true) activate(accounts.first())
         return accounts
+    }
+
+    /** Kids mode and PIN per profile key. */
+    val locks: Flow<Map<String, ProfileLock>> = store.locks
+
+    fun lock(account: Account): Flow<ProfileLock> = store.locks.map { it[account.key] ?: ProfileLock() }
+
+    suspend fun setLock(account: Account, lock: ProfileLock) = store.setLock(account.key, lock)
+
+    /**
+     * A session for background work that has no UI to pick a profile (the screensaver): the active
+     * one, or else the most recently used profile without a PIN (a PIN-locked profile's titles
+     * shouldn't show on screen while nobody unlocked it). Null when there's none.
+     */
+    suspend fun backgroundSession(): ActiveSession? {
+        current.value?.let { return it }
+        val (accounts, _) = store.snapshot()
+        val lockMap = locks.first()
+        val account = accounts.filter { lockMap[it.key]?.hasPin != true }.maxByOrNull { it.lastUsed } ?: return null
+        return ActiveSession(account, factory.create(account.serverUrl, account.accessToken))
     }
 
     suspend fun activate(account: Account) {

@@ -33,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
@@ -52,7 +53,9 @@ import com.johnw.emberfin.data.ImageUrls
 import com.johnw.emberfin.nav.AppNavigator
 import com.johnw.emberfin.playback.AudioTrackPolicy
 import com.johnw.emberfin.player.PlayerArgs
+import com.johnw.emberfin.data.Thumbs
 import com.johnw.emberfin.ui.ActionButton
+import com.johnw.emberfin.ui.ChoiceDialog
 import com.johnw.emberfin.ui.Art
 import com.johnw.emberfin.ui.Dimens
 import com.johnw.emberfin.ui.EpisodeTile
@@ -96,15 +99,18 @@ fun DetailsScreen(itemId: String, nav: AppNavigator, vm: DetailsViewModel = koin
         this.then(if (key == vm.focusKey) Modifier.focusRequester(restore) else Modifier)
             .onFocusChanged { if (it.isFocused) vm.focusKey = key }
 
+    // The page fades in once the title has loaded, instead of popping in.
+    val shown by animateFloatAsState(if (title != null) 1f else 0f, androidx.compose.animation.core.tween(300), label = "details-in")
     val scrolled = listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 200
     val dim by animateFloatAsState(if (scrolled) 0.82f else 0f, label = "dim")
 
-    Box(Modifier.fillMaxSize().background(Emberfin.colors.background)) {
+    Box(Modifier.fillMaxSize().background(Emberfin.colors.background).graphicsLayer { alpha = if (title == null) 1f else shown }) {
         if (title == null) {
             state.error?.let { Text(it, style = EmberfinType.body, color = Emberfin.colors.error, modifier = Modifier.padding(48.dp)) }
             return@Box
         }
-        KenBurnsBackdrop(ItemFormat.backdrop(api, title), Modifier.fillMaxSize())
+        // A new collection or playlist has no art of its own: borrow its first item's.
+        KenBurnsBackdrop(ItemFormat.backdrop(api, title) ?: state.children.firstOrNull()?.let { ItemFormat.backdrop(api, it) }, Modifier.fillMaxSize())
         HeroScrims(strength = 1f)
         Box(Modifier.fillMaxSize().background(Emberfin.colors.background.copy(alpha = dim)))
 
@@ -139,6 +145,22 @@ fun DetailsScreen(itemId: String, nav: AppNavigator, vm: DetailsViewModel = koin
                                     played = ItemFormat.played(ep),
                                     onClick = { nav.play(ep.id.toString()) },
                                     modifier = m.track("ep:${ep.id}"),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (state.children.isNotEmpty()) {
+                    val i = index++
+                    val label = if (title.type == BaseItemKind.PLAYLIST) "In this playlist" else "In this collection"
+                    item(key = "children") {
+                        Section(label, Modifier.section(i)) {
+                            PivotRow(state.children, key = { it.id.toString() }) { _, c, m ->
+                                PosterTile(
+                                    art = ItemFormat.poster(api, c), title = ItemFormat.title(c),
+                                    progress = ItemFormat.progress(c), played = ItemFormat.played(c),
+                                    onClick = { com.johnw.emberfin.shell.openItem(nav, c) }, modifier = m.track("child:${c.id}"),
                                 )
                             }
                         }
@@ -260,7 +282,41 @@ private fun Header(
                 "My List", icon = if (state.inMyList) EmberfinIcons.Check else EmberfinIcons.Plus,
                 onClick = vm::toggleMyList, modifier = track("mylist"),
             )
+            RateButton(state.thumbs, vm::setThumbs, track("rate"))
         }
+    }
+}
+
+/** Netflix-style rating: one button showing the current rating; OK opens the three choices. */
+@Composable
+private fun RateButton(thumbs: Thumbs, onRate: (Thumbs) -> Unit, modifier: Modifier) {
+    var open by remember { mutableStateOf(false) }
+    val icon = when (thumbs) {
+        Thumbs.Down -> EmberfinIcons.ThumbDown
+        Thumbs.Love -> EmberfinIcons.ThumbsUpDouble
+        else -> EmberfinIcons.ThumbUp
+    }
+    val label = when (thumbs) {
+        Thumbs.None -> "Rate"
+        Thumbs.Down -> "Not for me"
+        Thumbs.Up -> "I like this"
+        Thumbs.Love -> "Love this!"
+    }
+    ActionButton(label, onClick = { open = true }, icon = icon, modifier = modifier)
+    if (open) {
+        val choices = listOf(Thumbs.Down, Thumbs.Up, Thumbs.Love)
+        val labels = listOf("Not for me", "I like this", "Love this!") + if (thumbs != Thumbs.None) listOf("Remove rating") else emptyList()
+        ChoiceDialog(
+            title = "Rate this title",
+            options = labels,
+            selected = choices.indexOf(thumbs), // -1 (not rated): no check, focus on the first choice
+            onPick = { i ->
+                open = false
+                val pick = choices.getOrNull(i) ?: Thumbs.None
+                if (pick != thumbs) onRate(pick)
+            },
+            onDismiss = { open = false },
+        )
     }
 }
 

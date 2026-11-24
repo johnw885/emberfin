@@ -36,6 +36,10 @@ import androidx.tv.material3.Text
 import com.johnw.emberfin.data.Account
 import com.johnw.emberfin.data.ImageUrls
 import com.johnw.emberfin.data.JellyfinClientFactory
+import com.johnw.emberfin.data.ProfileLock
+import com.johnw.emberfin.ui.ActionButton
+import com.johnw.emberfin.ui.ChoiceDialog
+import androidx.compose.foundation.layout.padding
 import com.johnw.emberfin.data.SessionManager
 import com.johnw.emberfin.ui.Art
 import com.johnw.emberfin.ui.FocusStyle
@@ -60,20 +64,49 @@ class ProfilesViewModel(private val sessions: SessionManager, private val client
         .map { list -> list.sortedByDescending { it.lastUsed } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    val locks: StateFlow<Map<String, ProfileLock>> = sessions.locks.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    fun lock(account: Account): ProfileLock = locks.value[account.key] ?: ProfileLock()
+
     fun avatar(account: Account): Art? =
         ImageUrls.user(clients.create(account.serverUrl), account.userId.toUUID(), account.imageTag)?.let { Art(it.url) }
 
     suspend fun open(account: Account) = sessions.activate(account)
+
+    fun setLock(account: Account, lock: ProfileLock) {
+        viewModelScope.launch { sessions.setLock(account, lock) }
+    }
 }
 
-/** "Who's watching?": every profile saved on this TV, plus Add profile. */
+/** What the picker is asking for right now. */
+private sealed interface Prompt {
+    /** The profile's PIN, then [then]. */
+    data class Unlock(val account: Account, val then: () -> Unit) : Prompt
+    /** Kids mode and PIN options for a profile. */
+    data class Options(val account: Account) : Prompt
+    /** A new PIN: typed once, then [first] is set and it's typed again to confirm. */
+    data class NewPin(val account: Account, val first: String? = null) : Prompt
+}
+
+/**
+ * "Who's watching?": every profile saved on this TV, plus Add profile. A profile with a PIN asks
+ * for it before opening. "Manage profiles" switches the tiles to editing kids mode and the PIN
+ * (behind the profile's own PIN, if it has one).
+ */
 @Composable
 fun ProfilesScreen(onOpen: () -> Unit, onAdd: () -> Unit, vm: ProfilesViewModel = koinViewModel()) {
     val accounts by vm.accounts.collectAsStateWithLifecycle()
+    val locks by vm.locks.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val first = remember { FocusRequester() }
+    var manage by remember { mutableStateOf(false) }
+    var prompt by remember { mutableStateOf<Prompt?>(null) }
     val list = accounts ?: return
     LaunchedEffect(list.isNotEmpty()) { runCatching { first.requestFocus() } }
+
+    fun guarded(account: Account, then: () -> Unit) {
+        if (vm.lock(account).hasPin) prompt = Prompt.Unlock(account, then) else then()
+    }
 
     Column(
         Modifier.fillMaxSize().background(Emberfin.colors.background),
@@ -82,23 +115,81 @@ fun ProfilesScreen(onOpen: () -> Unit, onAdd: () -> Unit, vm: ProfilesViewModel 
     ) {
         Wordmark(size = 26)
         Spacer(Modifier.height(36.dp))
-        Text("Who's watching?", style = EmberfinType.headline.copy(fontSize = 34.sp), color = Emberfin.colors.onBackground)
+        Text(
+            if (manage) "Manage profiles" else "Who's watching?",
+            style = EmberfinType.headline.copy(fontSize = 34.sp), color = Emberfin.colors.onBackground,
+        )
         Spacer(Modifier.height(36.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
             list.forEachIndexed { i, account ->
+                val lock = locks[account.key] ?: ProfileLock()
                 ProfileTile(
                     name = account.userName.ifBlank { "Profile" },
-                    detail = account.serverName,
+                    detail = listOfNotNull("Kids".takeIf { lock.kids }, account.serverName).joinToString(" · "),
                     art = vm.avatar(account),
-                    onClick = { scope.launch { vm.open(account); onOpen() } },
+                    locked = lock.hasPin,
+                    editing = manage,
+                    onClick = {
+                        if (manage) guarded(account) { prompt = Prompt.Options(account) }
+                        else guarded(account) { scope.launch { vm.open(account); onOpen() } }
+                    },
                     modifier = if (i == 0) Modifier.focusRequester(first) else Modifier,
                 )
             }
-            ProfileTile(
-                name = "Add profile", detail = null, art = null, add = true, onClick = onAdd,
-                modifier = if (list.isEmpty()) Modifier.focusRequester(first) else Modifier,
+            if (!manage) {
+                ProfileTile(
+                    name = "Add profile", detail = null, art = null, add = true, onClick = onAdd,
+                    modifier = if (list.isEmpty()) Modifier.focusRequester(first) else Modifier,
+                )
+            }
+        }
+        if (list.isNotEmpty()) {
+            Spacer(Modifier.height(40.dp))
+            ActionButton(if (manage) "Done" else "Manage profiles", onClick = { manage = !manage })
+        }
+    }
+
+    when (val p = prompt) {
+        is Prompt.Unlock -> PinPad(
+            title = "Enter the PIN for ${p.account.userName}",
+            onComplete = { pin ->
+                if (vm.lock(p.account).checkPin(pin)) { prompt = null; p.then(); null } else "Wrong PIN. Try again."
+            },
+            onDismiss = { prompt = null },
+        )
+        is Prompt.Options -> {
+            val lock = vm.lock(p.account)
+            val kidsLabel = if (lock.kids) "Kids profile: On (turn off)" else "Kids profile: Off (turn on)"
+            val pinLabel = if (lock.hasPin) "Change the PIN" else "Set a PIN"
+            val labels = listOfNotNull(kidsLabel, pinLabel, "Remove the PIN".takeIf { lock.hasPin }, "Done")
+            ChoiceDialog(
+                title = p.account.userName.ifBlank { "Profile" },
+                options = labels,
+                selected = -1,
+                onPick = { i ->
+                    when (labels[i]) {
+                        kidsLabel -> { vm.setLock(p.account, lock.copy(kids = !lock.kids)); prompt = null }
+                        pinLabel -> prompt = Prompt.NewPin(p.account)
+                        "Remove the PIN" -> { vm.setLock(p.account, lock.withPin(null)); prompt = null }
+                        else -> prompt = null
+                    }
+                },
+                onDismiss = { prompt = null },
             )
         }
+        is Prompt.NewPin -> PinPad(
+            title = if (p.first == null) "Choose a 4-digit PIN" else "Enter the PIN again",
+            subtitle = "For ${p.account.userName}. This TV asks for it before opening the profile.",
+            onComplete = { pin ->
+                when {
+                    p.first == null -> { prompt = p.copy(first = pin); null }
+                    pin != p.first -> { prompt = p.copy(first = null); "The PINs didn't match. Choose one again." }
+                    else -> { vm.setLock(p.account, vm.lock(p.account).withPin(pin)); prompt = null; null }
+                }
+            },
+            onDismiss = { prompt = null },
+        )
+        null -> Unit
     }
 }
 
@@ -110,6 +201,8 @@ private fun ProfileTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     add: Boolean = false,
+    locked: Boolean = false,
+    editing: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(12.dp)
@@ -129,6 +222,16 @@ private fun ProfileTile(
                     art != null -> RemoteImage(art, contentDescription = name, modifier = Modifier.fillMaxSize())
                     else -> Text(initials(name), style = EmberfinType.display.copy(fontSize = 44.sp), color = androidx.compose.ui.graphics.Color.White)
                 }
+                if (editing) {
+                    Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
+                        Text("Edit", style = EmberfinType.title, color = androidx.compose.ui.graphics.Color.White)
+                    }
+                } else if (locked) {
+                    Icon(
+                        EmberfinIcons.Lock, contentDescription = "PIN", tint = androidx.compose.ui.graphics.Color.White,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(18.dp),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -136,6 +239,6 @@ private fun ProfileTile(
             name, style = EmberfinType.bodyStrong, maxLines = 1, overflow = TextOverflow.Ellipsis,
             color = if (focused) Emberfin.colors.onBackground else Emberfin.colors.muted,
         )
-        if (detail != null) Text(detail, style = EmberfinType.label, color = Emberfin.colors.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (!detail.isNullOrEmpty()) Text(detail, style = EmberfinType.label, color = Emberfin.colors.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
