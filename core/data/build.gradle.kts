@@ -5,7 +5,7 @@
 }
 
 android {
-    namespace = "com.johnw.reelfin.data"
+    namespace = "com.johnw.emberfin.data"
     compileSdk = 37
 
     defaultConfig {

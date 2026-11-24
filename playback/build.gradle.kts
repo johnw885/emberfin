@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "com.johnw.reelfin.playback"
+    namespace = "com.johnw.emberfin.playback"
     compileSdk = 37
 
     defaultConfig {

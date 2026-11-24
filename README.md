@@ -1,9 +1,9 @@
-# Reelfin
+# Emberfin
 
 A big-screen, streaming-service-style client for [Jellyfin](https://jellyfin.org) on Android TV and
 Google TV, built with Kotlin, Compose for TV and Media3 ExoPlayer.
 
-Reelfin is an independent project. It is not affiliated with or endorsed by the Jellyfin project.
+Emberfin is an independent project. It is not affiliated with or endorsed by the Jellyfin project.
 
 **Status:** MVP. Tested daily on a Google TV Streamer (4K) against Jellyfin 12.4. Not on Google Play yet;
 build it yourself and sideload it.
@@ -52,7 +52,7 @@ You need JDK 17 and the Android SDK (compileSdk 37).
 ./gradlew testDebugUnitTest    # unit tests
 ```
 
-Build output goes to `%USERPROFILE%\ReelfinBuild` on Windows (or `~/ReelfinBuild`); override it with
+Build output goes to `%USERPROFILE%\EmberfinBuild` on Windows (or `~/EmberfinBuild`); override it with
 `-PbuildRoot=...`. Release builds currently need `--no-configuration-cache`.
 
 To install on a TV, turn on Developer options and network debugging on the TV, then:

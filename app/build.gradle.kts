@@ -16,11 +16,11 @@ val localProps = Properties().apply {
 val devServerUrl: String = localProps.getProperty("DEV_SERVER_URL") ?: ""
 
 android {
-    namespace = "com.johnw.reelfin"
+    namespace = "com.johnw.emberfin"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.johnw.reelfin"
+        applicationId = "com.johnw.emberfin"
         minSdk = 28
         targetSdk = 37
         versionCode = 1

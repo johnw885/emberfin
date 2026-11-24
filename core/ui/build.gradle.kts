@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.johnw.reelfin.ui"
+    namespace = "com.johnw.emberfin.ui"
     compileSdk = 37
 
     defaultConfig {

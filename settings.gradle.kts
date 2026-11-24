@@ -14,7 +14,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Reelfin"
+rootProject.name = "Emberfin"
 include(":app")
 include(":core:data")
 include(":core:ui")
