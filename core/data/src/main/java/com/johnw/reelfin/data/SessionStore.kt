@@ -4,14 +4,14 @@ import android.content.Context
 import androidx.core.content.edit
 import java.util.UUID
 
-/** A signed-in account on one server. */
+/** The spike's single signed-in session (kept only to migrate it into [AccountStore]). */
 data class StoredSession(val serverUrl: String, val userId: String, val accessToken: String)
 
 /**
- * Keeps the per-install device id and the signed-in session.
+ * Holds the per-install device id. Also reads (once) the spike's single saved session so it can
+ * be migrated into [AccountStore]; it's cleared after migration.
  *
- * Spike storage: plain SharedPreferences in [FILE], which the manifest's backup rules exclude
- * so tokens never leave the device. A later session moves this to DataStore with multi-account support.
+ * Plain SharedPreferences in [FILE], which the backup rules exclude.
  */
 class SessionStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -22,27 +22,20 @@ class SessionStore(context: Context) {
             prefs.edit { putString(KEY_DEVICE_ID, it) }
         }
 
-    var lastServerUrl: String?
-        get() = prefs.getString(KEY_SERVER, null)
-        set(value) = prefs.edit { putString(KEY_SERVER, value) }
-
-    var session: StoredSession?
+    /** The spike's session, if one is still waiting to be migrated. */
+    val legacySession: StoredSession?
         get() {
             val server = prefs.getString(KEY_SERVER, null) ?: return null
             val user = prefs.getString(KEY_USER, null) ?: return null
             val token = prefs.getString(KEY_TOKEN, null) ?: return null
             return StoredSession(server, user, token)
         }
-        set(value) = prefs.edit {
-            if (value == null) {
-                remove(KEY_USER)
-                remove(KEY_TOKEN)
-            } else {
-                putString(KEY_SERVER, value.serverUrl)
-                putString(KEY_USER, value.userId)
-                putString(KEY_TOKEN, value.accessToken)
-            }
-        }
+
+    fun clearLegacySession() = prefs.edit {
+        remove(KEY_USER)
+        remove(KEY_TOKEN)
+        remove(KEY_SERVER)
+    }
 
     companion object {
         /** Must match the exclusions in app/src/main/res/xml/backup_rules.xml and data_extraction_rules.xml. */

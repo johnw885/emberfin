@@ -19,6 +19,8 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions.unitTests.isReturnDefaultValues = true
 }
 
 dependencies {
@@ -26,4 +28,9 @@ dependencies {
     api(libs.androidx.compose.ui)
     api(libs.androidx.compose.foundation)
     api(libs.androidx.tv.material)
+    api(libs.coil.compose)
+    // Pins lifecycle to the version :app uses (coil alone would pull an older, uncached one).
+    implementation(libs.androidx.lifecycle.runtime.compose)
+
+    testImplementation(libs.junit)
 }

@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 12+. Keep in sync with SessionStore.FILE. -->
+<!-- Android 12+. Keep in sync with SessionStore.FILE, AccountStore.FILE and ReelfinDatabase. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="reelfin_auth.xml" />
+        <exclude domain="file" path="datastore/reelfin_accounts.preferences_pb" />
+        <exclude domain="database" path="reelfin.db" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="reelfin_auth.xml" />
+        <exclude domain="file" path="datastore/reelfin_accounts.preferences_pb" />
+        <exclude domain="database" path="reelfin.db" />
     </device-transfer>
 </data-extraction-rules>

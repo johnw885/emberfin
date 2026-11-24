@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 // DEV_SERVER_URL lives in the git-ignored local.properties and only reaches debug builds,
@@ -45,6 +46,8 @@ android {
         compose = true
         buildConfig = true
     }
+
+    testOptions.unitTests.isReturnDefaultValues = true
 }
 
 dependencies {
@@ -64,4 +67,10 @@ dependencies {
     implementation(libs.media3.ui.compose)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.koin.android)
+    implementation(libs.koin.androidx.compose)
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.kotlinx.serialization.json)
+
+    testImplementation(libs.junit)
 }

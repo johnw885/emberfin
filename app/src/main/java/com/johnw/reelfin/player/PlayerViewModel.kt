@@ -71,10 +71,10 @@ data class PlayerUiState(
 
 /** Owns one [PlaybackController] for the life of the player screen and plays items through it. */
 class PlayerViewModel(private val app: ReelfinApp, private val args: PlayerArgs) : ViewModel(), PlaybackController.Listener {
-    private val session = app.auth.currentSession ?: error("Not signed in")
-    val api: ApiClient = app.clients.create(session.serverUrl, session.accessToken)
-    val authorizationHeader: String = app.clients.authorizationHeader(session.accessToken)
-    private val userId: UUID = session.userId.toUUID()
+    private val session = app.sessions.require()
+    val api: ApiClient = session.api
+    val authorizationHeader: String = app.clients.authorizationHeader(session.account.accessToken)
+    private val userId: UUID = session.userId
     val settings: PlaybackSettings = PlaybackPrefs(app).settings()
     private val audioPolicy = AudioTrackPolicy(settings.preferAtmos)
     private val negotiator = PlaybackNegotiator(

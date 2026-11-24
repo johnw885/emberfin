@@ -5,23 +5,25 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import org.jellyfin.sdk.api.client.extensions.authenticationApi
+import org.jellyfin.sdk.model.api.AuthenticateUserByName
+import org.jellyfin.sdk.model.api.AuthenticationResult
 import org.jellyfin.sdk.model.api.QuickConnectDto
 
 sealed interface QuickConnectState {
     data class Code(val code: String) : QuickConnectState
-    data class SignedIn(val session: StoredSession) : QuickConnectState
+    data class SignedIn(val account: Account) : QuickConnectState
 }
 
-class AuthRepository(private val factory: JellyfinClientFactory, private val store: SessionStore) {
-    val currentSession: StoredSession? get() = store.session
-
+/** Signs users in (Quick Connect or password) and returns the [Account] to save. */
+class AuthRepository(private val factory: JellyfinClientFactory) {
     /**
      * Quick Connect: emits the code to show, polls until the user approves it on another device,
-     * then exchanges the secret for a token and saves the session.
+     * then exchanges the secret for a token.
      */
-    fun quickConnect(serverUrl: String, pollMs: Long = 3_000): Flow<QuickConnectState> = flow {
-        val api = factory.create(serverUrl).authenticationApi
+    fun quickConnect(server: ServerInfo, pollMs: Long = 3_000): Flow<QuickConnectState> = flow {
+        val api = factory.create(server.url).authenticationApi
         var state = api.initiateQuickConnect().content
         emit(QuickConnectState.Code(state.code))
         while (!state.authenticated) {
@@ -29,16 +31,26 @@ class AuthRepository(private val factory: JellyfinClientFactory, private val sto
             state = api.getQuickConnectState(state.secret).content
         }
         val auth = api.authenticateWithQuickConnect(QuickConnectDto(secret = state.secret)).content
-        val session = StoredSession(
-            serverUrl = serverUrl,
-            userId = requireNotNull(auth.user?.id) { "Server returned no user" }.toString(),
-            accessToken = requireNotNull(auth.accessToken) { "Server returned no token" },
-        )
-        store.session = session
-        emit(QuickConnectState.SignedIn(session))
+        emit(QuickConnectState.SignedIn(auth.toAccount(server)))
     }.flowOn(Dispatchers.IO)
 
-    fun signOut() {
-        store.session = null
+    suspend fun signIn(server: ServerInfo, username: String, password: String): Account = withContext(Dispatchers.IO) {
+        val auth = factory.create(server.url).authenticationApi
+            .authenticateUserByName(AuthenticateUserByName(username = username, pw = password)).content
+        auth.toAccount(server)
+    }
+
+    private fun AuthenticationResult.toAccount(server: ServerInfo): Account {
+        val u = requireNotNull(user) { "Server returned no user" }
+        return Account(
+            serverId = server.id,
+            serverUrl = server.url,
+            serverName = server.name,
+            userId = u.id.toString(),
+            userName = u.name.orEmpty(),
+            accessToken = requireNotNull(accessToken) { "Server returned no token" },
+            imageTag = u.primaryImageTag,
+            lastUsed = System.currentTimeMillis(),
+        )
     }
 }
