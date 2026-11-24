@@ -1,0 +1,47 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please don't include your server address, access tokens, user ids or screenshots of your own library.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Emberfin version
+      description: Settings → About
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: "Google TV Streamer, Android 14"
+    validations:
+      required: true
+  - type: input
+    id: server
+    attributes:
+      label: Jellyfin server version
+      placeholder: "12.4.0"
+    validations:
+      required: true
+  - type: textarea
+    id: media
+    attributes:
+      label: "For playback problems: the file"
+      description: Container, video codec and HDR/Dolby Vision type, audio codecs and subtitle formats (from Jellyfin's media info), and whether the server dashboard shows direct play or transcoding.
+  - type: textarea
+    id: audio
+    attributes:
+      label: Audio setup
+      description: TV speakers, soundbar or receiver, and how it's connected (HDMI eARC/ARC, optical).

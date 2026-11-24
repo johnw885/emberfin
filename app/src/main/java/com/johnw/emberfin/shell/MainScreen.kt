@@ -1,7 +1,7 @@
 package com.johnw.emberfin.shell
 
-import android.app.Activity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -37,7 +37,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -113,7 +112,7 @@ fun MainScreen(nav: AppNavigator, vm: MainViewModel = koinViewModel()) {
     var navFocused by remember { mutableStateOf(false) }
     val navRequester = remember { FocusRequester() }
     val holder = rememberSaveableStateHolder()
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
     val health: ApiHealth = koinInject()
     val unreachable by health.unreachable.collectAsStateWithLifecycle()
     // Bumped to make the visible tab reload (Retry, or the server coming back).

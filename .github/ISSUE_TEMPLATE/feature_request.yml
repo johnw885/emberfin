@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest an idea for Emberfin
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do?
+      description: The problem, or the moment in the app where something is missing.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could it work?
+      description: How it would look and work with a TV remote (D-pad, OK, Back).
+  - type: textarea
+    id: server
+    attributes:
+      label: Server side
+      description: Does it need a Jellyfin plugin or a specific server version?

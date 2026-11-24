@@ -26,6 +26,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.LocalActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelStore
@@ -407,7 +408,7 @@ private val HANDLED_KEYS = setOf(
  */
 @Composable
 private fun VideoSurface(controller: PlaybackController, aspect: Float, firstFrame: Boolean) {
-    val window = (LocalContext.current as? android.app.Activity)?.window
+    val window = LocalActivity.current?.window
     val mode by controller.preferredDisplayMode.collectAsStateWithLifecycle()
     LaunchedEffect(window, mode) { window?.setPreferredDisplayMode(mode) }
     // Leaving the player gives the display back to the system (the home screen's own mode).

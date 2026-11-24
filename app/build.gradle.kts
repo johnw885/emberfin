@@ -15,6 +15,13 @@ val localProps = Properties().apply {
 }
 val devServerUrl: String = localProps.getProperty("DEV_SERVER_URL") ?: ""
 
+// Release signing comes from environment variables (CI sets them from GitHub secrets on a v* tag).
+// Without them, release builds are signed with the debug key for sideloading.
+val releaseKeystore: String? = providers.environmentVariable("EMBERFIN_KEYSTORE").orNull
+// Version from the tag in CI (-PappVersionName=1.2.3 -PappVersionCode=10203), else the defaults below.
+val appVersionName: String = (findProperty("appVersionName") as String?) ?: "0.1.0"
+val appVersionCode: Int = (findProperty("appVersionCode") as String?)?.toInt() ?: 1
+
 android {
     namespace = "com.johnw.emberfin"
     compileSdk = 37
@@ -23,8 +30,19 @@ android {
         applicationId = "com.johnw.emberfin"
         minSdk = 28
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
+    }
+
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = providers.environmentVariable("EMBERFIN_KEYSTORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("EMBERFIN_KEY_ALIAS").get()
+                keyPassword = providers.environmentVariable("EMBERFIN_KEY_PASSWORD").get()
+            }
+        }
     }
 
     buildTypes {
@@ -38,8 +56,8 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             buildConfigField("String", "DEV_SERVER_URL", "\"\"")
-            // Sideload-only for now: sign release builds with the debug key.
-            signingConfig = signingConfigs.getByName("debug")
+            // The upload key when CI provides it (see .github/workflows/release.yml), else the debug key.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
         // Release without R8, for generating the Baseline Profile: the ART profile dumped on the TV
         // must use the source class names (see baselineprofile/README.md).
@@ -62,6 +80,15 @@ android {
     }
 
     testOptions.unitTests.isReturnDefaultValues = true
+
+    lint {
+        // Lint errors fail the build (and CI); warnings are reported only.
+        abortOnError = true
+        // Dependabot proposes dependency updates, so lint doesn't need to.
+        disable += listOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion")
+        // Also check :core:data, :core:ui and :playback from this module's report.
+        checkDependencies = true
+    }
 }
 
 // The Compose group mapping (deobfuscates Compose stack traces after R8) needs a tool that isn't

@@ -1,5 +1,7 @@
 # Emberfin
 
+[![CI](https://github.com/johnw885/emberfin/actions/workflows/ci.yml/badge.svg)](https://github.com/johnw885/emberfin/actions/workflows/ci.yml)
+
 A big-screen, streaming-service-style client for [Jellyfin](https://jellyfin.org) on Android TV and
 Google TV, built with Kotlin, Compose for TV and Media3 ExoPlayer.
 
@@ -56,7 +58,7 @@ You need JDK 17 and the Android SDK (compileSdk 37).
 
 ```
 ./gradlew assembleDebug        # debug build
-./gradlew assembleRelease      # release build (signed with the debug key for sideloading)
+./gradlew assembleRelease      # release build (debug-signed unless the EMBERFIN_KEYSTORE* variables are set)
 ./gradlew testDebugUnitTest    # unit tests
 ```
 
@@ -92,6 +94,15 @@ Release builds never contain a server address.
 
 Screenshots will be added once there's a showcase library of Creative Commons films to show; the
 developer's own library is copyrighted material.
+
+## Contributing, security and privacy
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md). Report security
+problems privately as described in [SECURITY.md](SECURITY.md). Emberfin collects no data; see the
+[privacy policy](PRIVACY.md).
+
+Signed release APKs are attached to [GitHub Releases](https://github.com/johnw885/emberfin/releases)
+(built by CI from a `v*` tag).
 
 ## License
 
