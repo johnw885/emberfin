@@ -1,0 +1,21 @@
+Emberfin turns your Jellyfin media server into a living-room streaming experience on Android TV and Google TV. It's a client for Jellyfin: you need your own Jellyfin server (version 12.0 or newer). Emberfin is an independent open-source project, not affiliated with the Jellyfin project.
+
+<b>Made for the remote</b>
+• "Who's watching?" profiles, with Quick Connect or username and password sign-in
+• A home screen with a featured billboard (muted trailer previews when your server has local trailers), Continue Watching, Next Up, Recently Added, "Because you watched…", genres, collections, playlists and My List
+• Shows and Movies tabs with sorting and filters, details pages with seasons, episodes, cast and More Like This
+• Search with an on-screen keyboard or your remote's microphone
+
+<b>A player that gets the details right</b>
+• Direct play first, using your TV's real decoders and HDR support; the server only converts what your device can't play
+• Dolby Vision, HDR10, HDR10+ and HLG
+• Dolby Digital Plus / Atmos and Dolby Digital passthrough
+• Skip Intro and Skip Recap, a next-episode countdown, an Episodes panel and "Are you still watching?"
+• Trickplay thumbnails while scrubbing, subtitle size and background settings, frame-rate matching
+• Each series remembers your audio and subtitle choice
+• Start and control playback on the TV from the Jellyfin app on your phone
+
+<b>Private by design</b>
+No account with us, no ads, no analytics, no tracking. Emberfin only talks to the server you sign in to.
+
+Open source under the Apache 2.0 licence: https://github.com/johnw885/emberfin

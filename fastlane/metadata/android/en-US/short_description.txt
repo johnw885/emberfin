@@ -1,0 +1,1 @@
+A big-screen TV client for your own Jellyfin server, built for the remote.

@@ -92,8 +92,16 @@ Release builds never contain a server address.
 
 ## Screenshots
 
-Screenshots will be added once there's a showcase library of Creative Commons films to show; the
-developer's own library is copyrighted material.
+![Home](fastlane/metadata/android/en-US/images/tvScreenshots/1_home.jpg)
+
+| | |
+|---|---|
+| ![Details](fastlane/metadata/android/en-US/images/tvScreenshots/2_details.jpg) | ![Player](fastlane/metadata/android/en-US/images/tvScreenshots/3_player.jpg) |
+| ![Audio and subtitles](fastlane/metadata/android/en-US/images/tvScreenshots/4_audio_subtitles.jpg) | ![Search](fastlane/metadata/android/en-US/images/tvScreenshots/5_search.jpg) |
+
+Screenshots show Blender Foundation open movies (*Sintel*, *Big Buck Bunny*, *Elephants Dream*,
+*Tears of Steel*; © Blender Foundation, [CC BY](https://creativecommons.org/licenses/by/3.0/),
+[studio.blender.org](https://studio.blender.org/films/)) on a Jellyfin test server.
 
 ## Contributing, security and privacy
 

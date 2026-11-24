@@ -1,0 +1,1 @@
+First release: browse, search and play your Jellyfin library on Android TV and Google TV.
