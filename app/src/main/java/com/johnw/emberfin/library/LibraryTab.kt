@@ -25,6 +25,7 @@ import com.johnw.emberfin.browse.RowStyle
 import com.johnw.emberfin.browse.RowUi
 import com.johnw.emberfin.data.ActiveSession
 import com.johnw.emberfin.data.CachedRow
+import com.johnw.emberfin.data.CollectionGrouping
 import com.johnw.emberfin.data.LibraryQuery
 import com.johnw.emberfin.data.LibraryRepository
 import com.johnw.emberfin.data.LibrarySort
@@ -99,6 +100,7 @@ class LibraryTabViewModel(
         val parent = view?.id
         coroutineScope {
             val featured = async { optional(emptyList()) { library.featured(session, kinds, parent) } }
+            val sets = async { optional(emptyMap()) { library.collectionMembership(session) } }
             val latest = async { parent?.let { p -> optional(null) { library.latest(session, p) } }.orEmpty() }
             val genres = optional(emptyList()) { library.genres(session, kinds, parent) }
             val genreList = genres.mapNotNull { g -> g.name?.let { Genre(g.id, it) } }
@@ -109,8 +111,10 @@ class LibraryTabViewModel(
                         ?.takeIf { it.size >= 3 }?.let { RowUi("genre/${g.id}", g.name.orEmpty(), RowStyle.Poster, it) }
                 }
             }
-            val rows = listOfNotNull(latest.await().takeIf { it.isNotEmpty() }?.let { RowUi("latest", "New in ${view?.name ?: tab.label}", RowStyle.Poster, it) }) +
-                genreRows.awaitAll().filterNotNull()
+            // A collection shows as one tile (the "All" grid asks the server to do the same).
+            val membership = sets.await()
+            val rows = (listOfNotNull(latest.await().takeIf { it.isNotEmpty() }?.let { RowUi("latest", "New in ${view?.name ?: tab.label}", RowStyle.Poster, it) }) +
+                genreRows.awaitAll().filterNotNull()).map { it.copy(items = CollectionGrouping.collapse(it.items, membership)) }
             val pick = Billboard.pick(_state.value.billboard, featured.await())
             _state.update {
                 val q = it.grid.query ?: LibraryQuery(parentId = parent, kinds = kinds)

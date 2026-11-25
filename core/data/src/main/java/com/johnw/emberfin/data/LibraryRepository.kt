@@ -1,6 +1,9 @@
 package com.johnw.emberfin.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.genreApi
@@ -124,6 +127,8 @@ class LibraryRepository {
             filters = if (q.unwatchedOnly) listOf(ItemFilter.IS_UNPLAYED) else null,
             sortBy = listOf(q.sort.sortBy, ItemSortBy.SORT_NAME), order = q.sort.order,
             start = start, limit = limit, total = true,
+            // Like Jellyfin's "group movies into collections": only the plain, unfiltered grid.
+            collapseBoxSets = q.genreId == null && !q.unwatchedOnly,
         )
         return r
     }
@@ -203,6 +208,31 @@ class LibraryRepository {
         s, kinds = listOf(BaseItemKind.BOX_SET), sortBy = listOf(ItemSortBy.SORT_NAME), limit = limit,
     ).items
 
+    /**
+     * Which collection each title belongs to (title id → collection), for showing a collection as
+     * one tile. A title in several collections maps to the first by name.
+     */
+    suspend fun collectionMembership(s: ActiveSession): Map<UUID, BaseItemDto> = coroutineScope {
+        val sets = collections(s, limit = 200)
+        sets.map { set ->
+            async {
+                optionalIo {
+                    s.api.libraryApi.getItems(
+                        GetItemsRequest(userId = s.userId, parentId = set.id, enableImages = false, enableUserData = false),
+                    ).content.items.map { it.id to set }
+                }.orEmpty()
+            }
+        }.awaitAll().flatten().reversed().toMap()
+    }
+
+    /** Christmas titles (see [ChristmasSeason]): tagged `christmas` or in a "Christmas" genre. */
+    suspend fun christmas(s: ActiveSession, limit: Int = 60): List<BaseItemDto> = coroutineScope {
+        val kinds = listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES)
+        val byTag = async { items(s, kinds = kinds, tags = listOf(ChristmasSeason.TAG), sortBy = listOf(ItemSortBy.RANDOM), limit = limit).items }
+        val byGenre = async { items(s, kinds = kinds, genres = listOf(ChristmasSeason.GENRE), sortBy = listOf(ItemSortBy.RANDOM), limit = limit).items }
+        (byTag.await() + byGenre.await()).distinctBy { it.id }
+    }
+
     /** The user's playlists (video ones only; music isn't supported). */
     suspend fun playlists(s: ActiveSession, limit: Int = 24): List<BaseItemDto> = items(
         s, kinds = listOf(BaseItemKind.PLAYLIST), sortBy = listOf(ItemSortBy.DATE_CREATED), order = SortOrder.DESCENDING, limit = limit,
@@ -257,6 +287,9 @@ class LibraryRepository {
         filters: List<ItemFilter>? = null,
         genreIds: List<UUID>? = null,
         personIds: List<UUID>? = null,
+        tags: List<String>? = null,
+        genres: List<String>? = null,
+        collapseBoxSets: Boolean? = null,
         imageTypesFilter: List<ImageType>? = null,
         sortBy: List<ItemSortBy>? = null,
         order: SortOrder = SortOrder.ASCENDING,
@@ -268,6 +301,7 @@ class LibraryRepository {
             GetItemsRequest(
                 userId = s.userId, parentId = parentId, includeItemTypes = kinds, recursive = true,
                 filters = filters, genreIds = genreIds, personIds = personIds, imageTypes = imageTypesFilter,
+                tags = tags, genres = genres, collapseBoxSetItems = collapseBoxSets,
                 sortBy = sortBy, sortOrder = sortBy?.let { List(it.size) { order } },
                 startIndex = start, limit = limit, fields = listFields, enableUserData = true,
                 enableImageTypes = imageTypes, imageTypeLimit = 1, enableTotalRecordCount = total,
@@ -302,6 +336,16 @@ class LibraryRepository {
 
     private suspend fun ApiClient.userLibraryItem(userId: UUID, itemId: UUID): BaseItemDto =
         libraryApi.getItem(itemId = itemId, userId = userId).content
+
+    /** A part that may fail on its own (one collection's members): null on an ordinary error. */
+    private suspend fun <T> optionalIo(block: suspend () -> T): T? = try {
+        io(block)
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        if (e.isUnreachable()) throw e
+        null
+    }
 
     private suspend fun <T> io(block: suspend () -> T): T = withContext(Dispatchers.IO) { block() }
 

@@ -75,6 +75,10 @@ class MainActivity : ComponentActivity() {
         // `--ei still_watching_episodes <n>` / `--el still_watching_idle_ms <ms>`: ask sooner, for testing the prompt.
         if (intent.hasExtra("still_watching_episodes")) com.johnw.emberfin.player.PlayerViewModel.debugStillWatchingEpisodes = intent.getIntExtra("still_watching_episodes", 0).takeIf { it > 0 }
         if (intent.hasExtra("still_watching_idle_ms")) com.johnw.emberfin.player.PlayerViewModel.debugStillWatchingIdleMs = intent.getLongExtra("still_watching_idle_ms", 0L).takeIf { it > 0 }
+        // `--es today 2026-07-04` fakes the date for seasonal rows (empty = the real date); reopen Home to apply.
+        intent.getStringExtra("today")?.let { d ->
+            com.johnw.emberfin.home.HomeViewModel.debugToday = runCatching { java.time.LocalDate.parse(d) }.getOrNull()
+        }
         val id = intent.getStringExtra("play_item_id") ?: return
         debugPlay.trySend(PlayerRoute(id, intent.getLongExtra("start_ms", 0L)))
     }

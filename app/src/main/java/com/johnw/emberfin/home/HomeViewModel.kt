@@ -7,6 +7,8 @@ import com.johnw.emberfin.browse.RowStyle
 import com.johnw.emberfin.browse.RowUi
 import com.johnw.emberfin.data.ActiveSession
 import com.johnw.emberfin.data.CachedRow
+import com.johnw.emberfin.data.ChristmasSeason
+import com.johnw.emberfin.data.CollectionGrouping
 import com.johnw.emberfin.data.LibraryRepository
 import com.johnw.emberfin.data.Recommendations
 import com.johnw.emberfin.data.SessionManager
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.jellyfin.sdk.model.UUID
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import java.time.LocalDate
@@ -96,6 +99,8 @@ class HomeViewModel(
         val s = session
         val views = library.views(s)
         val featured = async { optional(emptyList()) { library.featured(s, listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES)) } }
+        val sets = async { optional(emptyMap()) { library.collectionMembership(s) } }
+        val christmas = async { christmasRow { sets.await() } }
         val resume = async { row(KEY_RESUME, "Continue Watching", RowStyle.Landscape) { library.resume(s) } }
         val nextUp = async { row(KEY_NEXT_UP, "Next Up", RowStyle.Landscape) { library.nextUp(s) } }
         val myList = async { row(KEY_MY_LIST, "My List", RowStyle.Poster) { library.favorites(s) } }
@@ -121,18 +126,23 @@ class HomeViewModel(
         }
         val collections = async { row(KEY_COLLECTIONS, "Collections", RowStyle.Poster) { library.collections(s) } }
         val playlists = async { row(KEY_PLAYLISTS, "Your Playlists", RowStyle.Poster) { library.playlists(s) } }
-        val latestRows = latest.awaitAll().filterNotNull()
-        val recRows = recs.await()
+        // Discovery rows show a collection as one tile; Continue Watching, Next Up and My List
+        // stay per title (they're about one specific film).
+        val membership = sets.await()
+        fun RowUi.grouped() = copy(items = CollectionGrouping.collapse(items, membership))
+        val latestRows = latest.awaitAll().filterNotNull().map { it.grouped() }
+        val recRows = recs.await().map { it.grouped() }
         // Netflix-style mix: personal rows between the "New in…" rows rather than all at the end.
         val rows = buildList {
             addAll(listOfNotNull(resume.await(), nextUp.await(), myList.await()))
+            christmas.await()?.let(::add)
             recRows.firstOrNull()?.let(::add)
             latestRows.firstOrNull()?.let(::add)
-            seriesLike.await()?.let(::add)
+            seriesLike.await()?.grouped()?.let(::add)
             addAll(latestRows.drop(1))
             addAll(recRows.drop(1))
             addAll(listOfNotNull(collections.await(), playlists.await()))
-            addAll(genres.await())
+            addAll(genres.await().map { it.grouped() })
         }
         featured.await() to rows
     }
@@ -149,7 +159,8 @@ class HomeViewModel(
         val myList = async { row(KEY_MY_LIST, "My List", RowStyle.Poster) { library.favorites(s) } }
         val latest = views.map { v -> async { row("latest/${v.id}", "New in ${v.name}", RowStyle.Poster) { library.latest(s, v.id) } } }
         val genres = async { genreRows { name -> KidsGenres.any { name.contains(it, ignoreCase = true) } } }
-        val rows = listOfNotNull(resume.await(), myList.await()) + latest.awaitAll().filterNotNull() + genres.await()
+        val christmas = async { christmasRow { optional(emptyMap()) { library.collectionMembership(s) } } }
+        val rows = listOfNotNull(resume.await(), myList.await(), christmas.await()) + latest.awaitAll().filterNotNull() + genres.await()
         featured.await() to rows
     }
 
@@ -164,6 +175,17 @@ class HomeViewModel(
         }.awaitAll().filterNotNull()
     }
 
+    /**
+     * "Christmas Movies", only from November 15 through January 1 (the TV's local date). See
+     * [ChristmasSeason] for what counts and how collections show.
+     */
+    private suspend fun christmasRow(membership: suspend () -> Map<UUID, BaseItemDto>): RowUi? {
+        if (!ChristmasSeason.isOn(today())) return null
+        return row(KEY_CHRISTMAS, ChristmasSeason.TITLE, RowStyle.Poster) {
+            CollectionGrouping.collapse(library.christmas(session), membership(), ChristmasSeason.MIN_COLLECTION_MEMBERS)
+        }
+    }
+
     private suspend fun row(key: String, title: String, style: RowStyle, fetch: suspend () -> List<BaseItemDto>): RowUi? =
         optional(null) { fetch() }?.takeIf { it.isNotEmpty() }?.let { RowUi(key, title, style, it) }
 
@@ -173,6 +195,11 @@ class HomeViewModel(
         const val KEY_MY_LIST = "mylist"
         const val KEY_COLLECTIONS = "collections"
         const val KEY_PLAYLISTS = "playlists"
+        const val KEY_CHRISTMAS = "christmas"
+
+        /** Today's date on the TV. Debug builds can fake it (`--es today 2026-07-04`) to test seasonal rows. */
+        @Volatile var debugToday: LocalDate? = null
+        fun today(): LocalDate = debugToday ?: LocalDate.now()
         val KidsGenres = listOf("Animation", "Family", "Kids", "Children", "Adventure", "Fantasy", "Comedy")
     }
 }
